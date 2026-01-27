@@ -1,0 +1,617 @@
+@import "tailwindcss";
+
+/* ============================================
+   VS Code Dark+ Theme - Enhanced
+   ============================================ */
+:root {
+  /* Base Colors */
+  --vscode-bg: #1e1e1e;
+  --vscode-fg: #cccccc;
+  --vscode-border: #2b2b2b;
+  --vscode-focusBorder: #007fd4;
+  --vscode-widget-shadow: 0 0 8px 2px rgba(0, 0, 0, 0.6);
+
+  /* Title Bar */
+  --vscode-titleBar-activeBg: #3c3c3c;
+  --vscode-titleBar-activeFg: #cccccc;
+  --vscode-titleBar-inactiveBg: #3c3c3c;
+  --vscode-titleBar-inactiveFg: #999999;
+
+  /* Activity Bar */
+  --vscode-activityBar-bg: #333333;
+  --vscode-activityBar-fg: #ffffff;
+  --vscode-activityBar-inactiveFg: rgba(255, 255, 255, 0.4);
+  --vscode-activityBar-border: #252526;
+  --vscode-activityBar-activeBorder: #ffffff;
+  --vscode-activityBarBadge-bg: #007acc;
+  --vscode-activityBarBadge-fg: #ffffff;
+
+  /* Side Bar */
+  --vscode-sideBar-bg: #252526;
+  --vscode-sideBar-fg: #cccccc;
+  --vscode-sideBar-border: #252526;
+  --vscode-sideBarTitle-fg: #bbbbbb;
+  --vscode-sideBarSectionHeader-bg: #00000000;
+  --vscode-sideBarSectionHeader-fg: #bbbbbb;
+
+  /* Editor Group & Tabs */
+  --vscode-editorGroupHeader-tabsBg: #252526;
+  --vscode-tab-bg: #2d2d2d;
+  --vscode-tab-fg: #969696;
+  --vscode-tab-border: #252526;
+  --vscode-tab-activeBg: #1e1e1e;
+  --vscode-tab-activeFg: #ffffff;
+  --vscode-tab-activeBorderTop: #007acc;
+  --vscode-tab-hoverBg: #2d2d2d;
+
+  /* Editor */
+  --vscode-editor-bg: #1e1e1e;
+  --vscode-editor-fg: #d4d4d4;
+  --vscode-editorLineNumber-fg: #858585;
+  --vscode-editorLineNumber-activeFg: #c6c6c6;
+
+  /* Lists & Trees */
+  --vscode-list-hoverBg: #2a2d2e;
+  --vscode-list-hoverFg: #cccccc;
+  --vscode-list-activeSelectionBg: #37373d;
+  --vscode-list-activeSelectionFg: #ffffff;
+  --vscode-list-focusBg: #04395e;
+  --vscode-list-focusFg: #ffffff;
+  --vscode-tree-indentGuidesStroke: #585858;
+
+  /* Status Bar */
+  --vscode-statusBar-bg: #007acc;
+  --vscode-statusBar-fg: #ffffff;
+  --vscode-statusBar-hoverBg: rgba(255, 255, 255, 0.12);
+  --vscode-statusBar-remoteBg: #16825d;
+
+  /* Panel */
+  --vscode-panel-border: #2b2b2b;
+
+  /* Inputs & Badges */
+  --vscode-input-bg: #3c3c3c;
+  --vscode-input-fg: #cccccc;
+  --vscode-input-border: #3c3c3c;
+  --vscode-input-placeholderFg: #a6a6a6;
+  --vscode-badge-bg: #4d4d4d;
+  --vscode-badge-fg: #ffffff;
+
+  /* Scrollbar */
+  --vscode-scrollbar-sliderBg: rgba(121, 121, 121, 0.4);
+  --vscode-scrollbar-sliderHoverBg: rgba(100, 100, 100, 0.7);
+  --vscode-scrollbar-sliderActiveBg: rgba(191, 191, 191, 0.4);
+
+  /* AI Panel */
+  --ai-accent: #007acc;
+  --ai-accent-hover: #005a9e;
+
+  /* Fonts */
+  --font-sans: 'Segoe UI', 'SF UI Text', 'Helvetica Neue', 'Helvetica', 'Arial', sans-serif;
+  --font-mono: 'Cascadia Code', 'Fira Code', 'Menlo', 'Monaco', 'Consolas', 'Courier New', monospace;
+}
+
+/* ============================================
+   Reset & Base
+   ============================================ */
+*,
+*::before,
+*::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  background-color: var(--vscode-bg);
+  color: var(--vscode-fg);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ============================================
+   Utilities
+   ============================================ */
+.flex-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.truncate {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cursor-pointer {
+  cursor: pointer;
+}
+
+.select-none {
+  user-select: none;
+}
+
+/* ============================================
+   Activity Bar
+   ============================================ */
+.activity-bar {
+  width: 48px;
+  background-color: var(--vscode-activityBar-bg);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.activity-item {
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity 0.15s ease, background-color 0.15s ease;
+  color: var(--vscode-activityBar-fg);
+}
+
+.activity-item:hover {
+  opacity: 1;
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.activity-item.active {
+  opacity: 1;
+}
+
+.activity-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background-color: var(--vscode-activityBar-activeBorder);
+}
+
+.activity-badge {
+  position: absolute;
+  bottom: 8px;
+  right: 4px;
+  background-color: var(--vscode-activityBarBadge-bg);
+  color: var(--vscode-activityBarBadge-fg);
+  font-size: 9px;
+  font-weight: 600;
+  min-width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+}
+
+/* ============================================
+   Side Bar
+   ============================================ */
+.sidebar {
+  width: 260px;
+  background-color: var(--vscode-sideBar-bg);
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--vscode-border);
+}
+
+.sidebar-title {
+  height: 35px;
+  padding: 0 20px;
+  display: flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--vscode-sideBarTitle-fg);
+}
+
+.sidebar-section-header {
+  height: 22px;
+  display: flex;
+  align-items: center;
+  padding: 0 4px;
+  cursor: pointer;
+  font-weight: 700;
+  color: var(--vscode-sideBarSectionHeader-fg);
+  font-size: 11px;
+  text-transform: uppercase;
+  transition: background-color 0.1s ease;
+}
+
+.sidebar-section-header:hover {
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.sidebar-section-icon {
+  width: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 4px;
+  transition: transform 0.15s ease;
+}
+
+/* ============================================
+   Tree / List
+   ============================================ */
+.list-item {
+  height: 22px;
+  display: flex;
+  align-items: center;
+  padding-right: 10px;
+  cursor: pointer;
+  color: var(--vscode-sideBar-fg);
+  font-size: 13px;
+  position: relative;
+  transition: background-color 0.1s ease;
+}
+
+.list-item:hover {
+  background-color: var(--vscode-list-hoverBg);
+}
+
+.list-item.selected {
+  background-color: var(--vscode-list-activeSelectionBg);
+  color: var(--vscode-list-activeSelectionFg);
+}
+
+.list-item.focused {
+  background-color: var(--vscode-list-focusBg);
+  color: var(--vscode-list-focusFg);
+}
+
+.indent-guide {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background-color: var(--vscode-tree-indentGuidesStroke);
+  opacity: 0.4;
+}
+
+/* ============================================
+   Editor Group (Tabs)
+   ============================================ */
+.editor-group-header {
+  height: 35px;
+  background-color: var(--vscode-editorGroupHeader-tabsBg);
+  display: flex;
+  overflow-x: auto;
+}
+
+.tab {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  min-width: 120px;
+  max-width: 200px;
+  background-color: var(--vscode-tab-bg);
+  color: var(--vscode-tab-fg);
+  border-right: 1px solid var(--vscode-tab-border);
+  cursor: pointer;
+  font-size: 13px;
+  position: relative;
+  transition: background-color 0.1s ease;
+}
+
+.tab:hover {
+  background-color: var(--vscode-tab-hoverBg);
+}
+
+.tab.active {
+  background-color: var(--vscode-tab-activeBg);
+  color: var(--vscode-tab-activeFg);
+}
+
+.tab.active::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background-color: var(--vscode-tab-activeBorderTop);
+}
+
+.tab-icon {
+  margin-right: 6px;
+  font-size: 14px;
+}
+
+.tab-label {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tab-close {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  margin-left: 6px;
+  opacity: 0;
+  transition: opacity 0.15s ease, background-color 0.1s ease;
+}
+
+.tab:hover .tab-close {
+  opacity: 1;
+}
+
+.tab-close:hover {
+  background-color: rgba(255, 255, 255, 0.15);
+}
+
+.tab-dirty {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--vscode-fg);
+  margin-left: 6px;
+}
+
+/* ============================================
+   Breadcrumb
+   ============================================ */
+.breadcrumb {
+  height: 22px;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  background-color: var(--vscode-editor-bg);
+  font-size: 13px;
+  color: var(--vscode-fg);
+}
+
+.breadcrumb-item {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  opacity: 0.8;
+  transition: opacity 0.1s ease;
+}
+
+.breadcrumb-item:hover {
+  opacity: 1;
+}
+
+/* ============================================
+   Editor
+   ============================================ */
+.editor-container {
+  flex: 1;
+  background-color: var(--vscode-editor-bg);
+  position: relative;
+}
+
+/* ============================================
+   Status Bar
+   ============================================ */
+.status-bar {
+  height: 22px;
+  background-color: var(--vscode-statusBar-bg);
+  color: var(--vscode-statusBar-fg);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.status-bar-item {
+  padding: 0 8px;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  transition: background-color 0.1s ease;
+}
+
+.status-bar-item:hover {
+  background-color: var(--vscode-statusBar-hoverBg);
+}
+
+/* ============================================
+   Scrollbar (Webkit)
+   ============================================ */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: var(--vscode-scrollbar-sliderBg);
+  border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--vscode-scrollbar-sliderHoverBg);
+}
+
+::-webkit-scrollbar-thumb:active {
+  background-color: var(--vscode-scrollbar-sliderActiveBg);
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Custom thin scrollbar for panels */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 8px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background-color: rgba(121, 121, 121, 0.3);
+  border-radius: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(121, 121, 121, 0.5);
+}
+
+/* ============================================
+   Animations
+   ============================================ */
+@keyframes pulse {
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@keyframes bounce {
+
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-25%);
+  }
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.animate-bounce {
+  animation: bounce 1s infinite;
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+/* ============================================
+   AI Panel Specific Styles
+   ============================================ */
+.prose {
+  color: var(--vscode-fg);
+}
+
+.prose-sm p {
+  font-size: 13px;
+}
+
+.prose a {
+  color: #3794ff;
+  text-decoration: underline;
+}
+
+.prose a:hover {
+  color: #4da6ff;
+}
+
+.prose strong {
+  font-weight: 600;
+  color: var(--vscode-fg);
+}
+
+.prose em {
+  font-style: italic;
+}
+
+.prose code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.prose pre {
+  margin: 0;
+  padding: 0;
+}
+
+.prose ul,
+.prose ol {
+  margin-left: 0;
+  padding-left: 1.25em;
+}
+
+.prose li {
+  margin-bottom: 0.25em;
+}
+
+.prose blockquote {
+  border-left: 3px solid #007acc;
+  padding-left: 12px;
+  margin: 8px 0;
+  opacity: 0.9;
+}
+
+/* ============================================
+   Glassmorphism Effects (Subtle)
+   ============================================ */
+.glass {
+  background: rgba(30, 30, 30, 0.8);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+/* ============================================
+   Focus States
+   ============================================ */
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+
+/* ============================================
+   Transitions
+   ============================================ */
+.transition-all {
+  transition: all 0.15s ease;
+}
+
+.transition-colors {
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.transition-opacity {
+  transition: opacity 0.15s ease;
+}
+
+.transition-transform {
+  transition: transform 0.15s ease;
+}
