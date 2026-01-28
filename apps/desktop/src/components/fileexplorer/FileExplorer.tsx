@@ -116,14 +116,20 @@ const TreeItem: React.FC<TreeItemProps> = ({ node, depth }) => {
     );
 };
 
-export const FileExplorer: React.FC = () => {
+interface FileExplorerProps {
+    folderPath?: string | null;
+}
+
+export const FileExplorer: React.FC<FileExplorerProps> = ({ folderPath }) => {
     const [files, setFiles] = useState<FileNode[]>([]);
     const { readDir } = useFileSystem();
 
     const loadFiles = useCallback(async () => {
-        const tree = await readDir('/');
+        // Use provided folder path or default to '/' (which maps to APP_ROOT)
+        const pathToRead = folderPath || '/';
+        const tree = await readDir(pathToRead);
         setFiles(tree);
-    }, [readDir]);
+    }, [readDir, folderPath]);
 
     useEffect(() => {
         loadFiles();

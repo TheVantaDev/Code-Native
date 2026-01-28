@@ -109,6 +109,57 @@ ipcMain.handle('fs:readDir', async (_, dirPath: string) => {
   }
 })
 
+// Open folder dialog
+ipcMain.handle('dialog:openFolder', async () => {
+  const { dialog } = await import('electron')
+  const result = await dialog.showOpenDialog(win!, {
+    properties: ['openDirectory'],
+    title: 'Open Folder',
+  })
+  if (result.canceled || result.filePaths.length === 0) {
+    return null
+  }
+  return result.filePaths[0]
+})
+
+// Create new file
+ipcMain.handle('fs:createFile', async (_, filePath: string, content: string = '') => {
+  try {
+    await fs.writeFile(filePath, content, 'utf-8')
+    return true
+  } catch (error) {
+    console.error('Error creating file:', error)
+    throw error
+  }
+})
+
+// Create new folder
+ipcMain.handle('fs:createFolder', async (_, folderPath: string) => {
+  try {
+    await fs.mkdir(folderPath, { recursive: true })
+    return true
+  } catch (error) {
+    console.error('Error creating folder:', error)
+    throw error
+  }
+})
+
+// Delete file or folder
+ipcMain.handle('fs:delete', async (_, targetPath: string) => {
+  try {
+    const stat = await fs.stat(targetPath)
+    if (stat.isDirectory()) {
+      await fs.rm(targetPath, { recursive: true })
+    } else {
+      await fs.unlink(targetPath)
+    }
+    return true
+  } catch (error) {
+    console.error('Error deleting:', error)
+    throw error
+  }
+})
+
 // ============ Window Control IPC Handlers ============
 
 ipcMain.on('window-minimize', () => {

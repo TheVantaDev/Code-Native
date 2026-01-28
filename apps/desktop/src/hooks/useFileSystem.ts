@@ -136,7 +136,12 @@ Welcome to CodeNative IDE!
 `,
 };
 
-export function useFileSystem(): FileSystemAPI {
+export function useFileSystem(): FileSystemAPI & {
+    openFolderDialog: () => Promise<string | null>;
+    createFile: (path: string, content?: string) => Promise<boolean>;
+    createFolder: (path: string) => Promise<boolean>;
+    deleteItem: (path: string) => Promise<boolean>;
+} {
     const electronAvailable = isElectron();
 
     return useMemo(() => ({
@@ -167,6 +172,40 @@ export function useFileSystem(): FileSystemAPI {
             } else {
                 // Return mock file system
                 return mockFileSystem;
+            }
+        },
+
+        openFolderDialog: async (): Promise<string | null> => {
+            if (electronAvailable) {
+                return (window as any).ipcRenderer.invoke('dialog:openFolder');
+            } else {
+                // Web mode: prompt for folder path (simulated)
+                return prompt('Enter folder path:');
+            }
+        },
+
+        createFile: async (path: string, content: string = ''): Promise<boolean> => {
+            if (electronAvailable) {
+                return (window as any).ipcRenderer.invoke('fs:createFile', path, content);
+            } else {
+                mockFileContents[path] = content;
+                return true;
+            }
+        },
+
+        createFolder: async (path: string): Promise<boolean> => {
+            if (electronAvailable) {
+                return (window as any).ipcRenderer.invoke('fs:createFolder', path);
+            } else {
+                return true;
+            }
+        },
+
+        deleteItem: async (path: string): Promise<boolean> => {
+            if (electronAvailable) {
+                return (window as any).ipcRenderer.invoke('fs:delete', path);
+            } else {
+                return true;
             }
         },
     }), [electronAvailable]);

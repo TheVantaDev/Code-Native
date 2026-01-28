@@ -1,14 +1,22 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Bot, Trash2, Sparkles, MoreHorizontal, X, StopCircle, RefreshCw, ChevronDown, Copy, Check, Cpu, Wifi, WifiOff } from 'lucide-react';
+import { Send, Bot, Trash2, Sparkles, MoreHorizontal, X, StopCircle, RefreshCw, ChevronDown, Copy, Check, Cpu, Wifi, WifiOff, FileEdit, FilePlus, Play } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { useOllama } from '../../hooks/useOllama';
 import { useUIStore } from '../../stores/uiStore';
+import { useEditorStore } from '../../stores/editorStore';
+import { useFileSystem } from '../../hooks/useFileSystem';
 
-// Code block component with copy button
+// Code block component with action buttons
 const CodeBlock: React.FC<{ language?: string; value: string }> = ({ language, value }) => {
     const [copied, setCopied] = useState(false);
+    const [applied, setApplied] = useState(false);
+    const [showCreateModal, setShowCreateModal] = useState(false);
+    const [newFileName, setNewFileName] = useState('');
+    const { openFiles, activeFileId, updateFileContent } = useEditorStore();
+    const { currentFolderPath } = useUIStore();
+    const { createFile } = useFileSystem();
 
     const handleCopy = async () => {
         await navigator.clipboard.writeText(value);
@@ -16,18 +24,106 @@ const CodeBlock: React.FC<{ language?: string; value: string }> = ({ language, v
         setTimeout(() => setCopied(false), 2000);
     };
 
+    const handleApplyToEditor = () => {
+        // Apply code to currently active editor
+        if (activeFileId) {
+            updateFileContent(activeFileId, value);
+            setApplied(true);
+            setTimeout(() => setApplied(false), 2000);
+        }
+    };
+
+    const handleCreateFile = async () => {
+        if (!newFileName.trim()) return;
+
+        // Build file path
+        const basePath = currentFolderPath || '.';
+        const filePath = `${basePath}/${newFileName}`;
+
+        try {
+            await createFile(filePath, value);
+            setShowCreateModal(false);
+            setNewFileName('');
+            // Could also open the new file in the editor here
+        } catch (error) {
+            console.error('Failed to create file:', error);
+        }
+    };
+
+    const activeFileName = openFiles.find(f => f.id === activeFileId)?.name;
+
     return (
         <div className="relative group my-2 rounded-md overflow-hidden">
+            {/* Header with language and action buttons */}
             <div className="flex items-center justify-between px-3 py-1.5 bg-[#2d2d2d] text-[10px] text-gray-400 border-b border-[#404040]">
                 <span>{language || 'code'}</span>
-                <button
-                    onClick={handleCopy}
-                    className="flex items-center gap-1 px-2 py-0.5 rounded hover:bg-[#404040] transition-colors cursor-pointer bg-transparent border-none text-gray-400"
-                >
-                    {copied ? <Check size={12} /> : <Copy size={12} />}
-                    <span>{copied ? 'Copied!' : 'Copy'}</span>
-                </button>
+                <div className="flex items-center gap-1">
+                    {/* Apply to Editor button */}
+                    {activeFileId && (
+                        <button
+                            onClick={handleApplyToEditor}
+                            className="flex items-center gap-1 px-2 py-0.5 rounded hover:bg-[#404040] transition-colors cursor-pointer bg-transparent border-none text-gray-400 hover:text-green-400"
+                            title={`Apply to ${activeFileName}`}
+                        >
+                            {applied ? <Check size={12} className="text-green-400" /> : <FileEdit size={12} />}
+                            <span>{applied ? 'Applied!' : 'Apply'}</span>
+                        </button>
+                    )}
+                    {/* Create File button */}
+                    <button
+                        onClick={() => setShowCreateModal(true)}
+                        className="flex items-center gap-1 px-2 py-0.5 rounded hover:bg-[#404040] transition-colors cursor-pointer bg-transparent border-none text-gray-400 hover:text-blue-400"
+                        title="Create new file with this code"
+                    >
+                        <FilePlus size={12} />
+                        <span>Create</span>
+                    </button>
+                    {/* Copy button */}
+                    <button
+                        onClick={handleCopy}
+                        className="flex items-center gap-1 px-2 py-0.5 rounded hover:bg-[#404040] transition-colors cursor-pointer bg-transparent border-none text-gray-400"
+                    >
+                        {copied ? <Check size={12} /> : <Copy size={12} />}
+                        <span>{copied ? 'Copied!' : 'Copy'}</span>
+                    </button>
+                </div>
             </div>
+
+            {/* Create File Modal */}
+            {showCreateModal && (
+                <div className="absolute inset-0 bg-[#1e1e1e]/95 z-10 flex flex-col items-center justify-center p-4">
+                    <div className="w-full max-w-[250px] bg-[#252526] rounded-lg border border-[#404040] p-4 shadow-xl">
+                        <h4 className="text-[12px] font-semibold mb-3 text-white">Create New File</h4>
+                        <input
+                            type="text"
+                            value={newFileName}
+                            onChange={(e) => setNewFileName(e.target.value)}
+                            placeholder="filename.ts"
+                            className="w-full px-3 py-2 bg-[#1e1e1e] border border-[#404040] rounded text-[12px] text-white outline-none focus:border-[#007acc] mb-3"
+                            autoFocus
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleCreateFile();
+                                if (e.key === 'Escape') setShowCreateModal(false);
+                            }}
+                        />
+                        <div className="flex gap-2">
+                            <button
+                                onClick={handleCreateFile}
+                                className="flex-1 px-3 py-1.5 bg-[#007acc] text-white text-[11px] rounded hover:bg-[#005a9e] transition-colors cursor-pointer border-none"
+                            >
+                                Create
+                            </button>
+                            <button
+                                onClick={() => setShowCreateModal(false)}
+                                className="px-3 py-1.5 bg-[#404040] text-gray-300 text-[11px] rounded hover:bg-[#525252] transition-colors cursor-pointer border-none"
+                            >
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             <SyntaxHighlighter
                 style={vscDarkPlus}
                 language={language || 'text'}

@@ -1,5 +1,7 @@
 import React from 'react';
 import { useEditorStore } from '../../stores/editorStore';
+import { useUIStore } from '../../stores/uiStore';
+import { useFileSystem } from '../../hooks/useFileSystem';
 import { EditorTab } from './EditorTab';
 import { EditorPane } from './EditorPane';
 import { ChevronRight, Code2, Folder, FileText, Sparkles, Terminal, Keyboard, GitBranch } from 'lucide-react';
@@ -43,6 +45,7 @@ export const EditorArea: React.FC = () => {
                         content={activeFile.content}
                         language={activeFile.language}
                         fileId={activeFile.id}
+                        filePath={activeFile.path}
                     />
                 ) : (
                     <WelcomeScreen />

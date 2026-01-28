@@ -6,12 +6,14 @@ interface UIState {
     isAIPanelOpen: boolean;
     isSidebarOpen: boolean;
     isTerminalOpen: boolean;
+    currentFolderPath: string | null;
 
     // Actions
     setSidebarView: (view: SidebarView) => void;
     toggleAIPanel: () => void;
     toggleSidebar: () => void;
     toggleTerminal: () => void;
+    setCurrentFolder: (path: string | null) => void;
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -19,6 +21,7 @@ export const useUIStore = create<UIState>((set) => ({
     isAIPanelOpen: true,
     isSidebarOpen: true,
     isTerminalOpen: false,
+    currentFolderPath: null,
 
     setSidebarView: (view) => set({ sidebarView: view, isSidebarOpen: true }),
 
@@ -27,4 +30,6 @@ export const useUIStore = create<UIState>((set) => ({
     toggleSidebar: () => set((state) => ({ isSidebarOpen: !state.isSidebarOpen })),
 
     toggleTerminal: () => set((state) => ({ isTerminalOpen: !state.isTerminalOpen })),
+
+    setCurrentFolder: (path) => set({ currentFolderPath: path }),
 }));

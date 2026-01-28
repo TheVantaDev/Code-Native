@@ -10,20 +10,21 @@
         "preview": "vite preview"
     },
     "dependencies": {
+        "@code-native/shared": "workspace:*",
         "@monaco-editor/react": "^4.7.0",
-        "@xterm/xterm": "^5.5.0",
         "@xterm/addon-fit": "^0.10.0",
+        "@xterm/xterm": "^5.5.0",
         "lucide-react": "^0.562.0",
         "react": "^18.2.0",
         "react-dom": "^18.2.0",
         "react-markdown": "^10.1.0",
         "react-syntax-highlighter": "^16.1.0",
         "socket.io-client": "^4.7.0",
-        "zustand": "^5.0.9",
-        "@code-native/shared": "workspace:*"
+        "zustand": "^5.0.9"
     },
     "devDependencies": {
         "@tailwindcss/postcss": "^4.1.18",
+        "@types/node": "^20.19.30",
         "@types/react": "^18.2.64",
         "@types/react-dom": "^18.2.21",
         "@types/react-syntax-highlighter": "^15.5.13",

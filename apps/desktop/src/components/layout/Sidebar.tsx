@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { useUIStore } from '../../stores/uiStore';
+import { useFileSystem } from '../../hooks/useFileSystem';
 import { FileExplorer } from '../fileexplorer/FileExplorer';
-import { Search, ChevronDown, MoreHorizontal, RefreshCw, Plus, ChevronsDownUp, AlertCircle } from 'lucide-react';
+import { Search, ChevronDown, MoreHorizontal, RefreshCw, Plus, ChevronsDownUp, AlertCircle, FolderOpen } from 'lucide-react';
 
 // Reusable Section Header Component
 interface SectionProps {
@@ -33,26 +34,6 @@ const Section: React.FC<SectionProps> = ({ title, children, defaultExpanded = tr
     );
 };
 
-// Sidebar Header Actions (Icons)
-const SidebarActions: React.FC = () => (
-    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-        {[
-            { Icon: Plus, title: 'New File' },
-            { Icon: RefreshCw, title: 'Refresh' },
-            { Icon: ChevronsDownUp, title: 'Collapse All' },
-            { Icon: MoreHorizontal, title: 'More Actions' },
-        ].map(({ Icon, title }, i) => (
-            <button
-                key={i}
-                className="p-1.5 rounded hover:bg-[rgba(255,255,255,0.1)] transition-colors cursor-pointer border-none bg-transparent text-[var(--vscode-sideBarTitle-fg)]"
-                title={title}
-            >
-                <Icon size={14} strokeWidth={1.5} />
-            </button>
-        ))}
-    </div>
-);
-
 // Empty State Component
 const EmptyState: React.FC<{ message: string }> = ({ message }) => (
     <div className="px-6 py-2 italic opacity-50 cursor-default select-none text-[12px] flex items-center gap-2">
@@ -62,9 +43,28 @@ const EmptyState: React.FC<{ message: string }> = ({ message }) => (
 );
 
 export const Sidebar: React.FC = () => {
-    const { sidebarView, isSidebarOpen } = useUIStore();
+    const { sidebarView, isSidebarOpen, currentFolderPath, setCurrentFolder } = useUIStore();
+    const { openFolderDialog } = useFileSystem();
+    const [refreshKey, setRefreshKey] = useState(0);
+
+    const handleOpenFolder = async () => {
+        const folderPath = await openFolderDialog();
+        if (folderPath) {
+            setCurrentFolder(folderPath);
+            setRefreshKey(k => k + 1); // Force FileExplorer refresh
+        }
+    };
+
+    const handleRefresh = () => {
+        setRefreshKey(k => k + 1);
+    };
 
     if (!isSidebarOpen) return null;
+
+    // Get folder name from path
+    const folderName = currentFolderPath
+        ? currentFolderPath.split(/[/\\]/).pop() || 'Project'
+        : 'CodeNative';
 
     return (
         <div className="sidebar">
@@ -73,7 +73,40 @@ export const Sidebar: React.FC = () => {
                 <span className="truncate" style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                     {sidebarView === 'files' ? 'Explorer' : 'Search'}
                 </span>
-                <SidebarActions />
+                <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                        onClick={handleOpenFolder}
+                        className="p-1.5 rounded hover:bg-[rgba(255,255,255,0.1)] transition-colors cursor-pointer border-none bg-transparent text-[var(--vscode-sideBarTitle-fg)]"
+                        title="Open Folder"
+                    >
+                        <FolderOpen size={14} strokeWidth={1.5} />
+                    </button>
+                    <button
+                        className="p-1.5 rounded hover:bg-[rgba(255,255,255,0.1)] transition-colors cursor-pointer border-none bg-transparent text-[var(--vscode-sideBarTitle-fg)]"
+                        title="New File"
+                    >
+                        <Plus size={14} strokeWidth={1.5} />
+                    </button>
+                    <button
+                        onClick={handleRefresh}
+                        className="p-1.5 rounded hover:bg-[rgba(255,255,255,0.1)] transition-colors cursor-pointer border-none bg-transparent text-[var(--vscode-sideBarTitle-fg)]"
+                        title="Refresh"
+                    >
+                        <RefreshCw size={14} strokeWidth={1.5} />
+                    </button>
+                    <button
+                        className="p-1.5 rounded hover:bg-[rgba(255,255,255,0.1)] transition-colors cursor-pointer border-none bg-transparent text-[var(--vscode-sideBarTitle-fg)]"
+                        title="Collapse All"
+                    >
+                        <ChevronsDownUp size={14} strokeWidth={1.5} />
+                    </button>
+                    <button
+                        className="p-1.5 rounded hover:bg-[rgba(255,255,255,0.1)] transition-colors cursor-pointer border-none bg-transparent text-[var(--vscode-sideBarTitle-fg)]"
+                        title="More Actions"
+                    >
+                        <MoreHorizontal size={14} strokeWidth={1.5} />
+                    </button>
+                </div>
             </div>
 
             {/* Content Area */}
@@ -84,8 +117,8 @@ export const Sidebar: React.FC = () => {
                             <EmptyState message="No open editors" />
                         </Section>
 
-                        <Section title="CodeNative">
-                            <FileExplorer />
+                        <Section title={folderName}>
+                            <FileExplorer key={refreshKey} folderPath={currentFolderPath} />
                         </Section>
 
                         <Section title="Outline" defaultExpanded={false}>
