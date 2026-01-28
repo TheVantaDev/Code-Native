@@ -1,0 +1,32 @@
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Install pnpm
+RUN npm install -g pnpm
+
+# Copy workspace files
+COPY pnpm-workspace.yaml package.json ./
+COPY apps/backend/package.json ./apps/backend/
+COPY packages/shared/package.json ./packages/shared/
+
+# Install dependencies
+RUN pnpm install --frozen-lockfile
+
+# Copy source
+COPY apps/backend ./apps/backend
+COPY packages/shared ./packages/shared
+
+# Build shared package
+WORKDIR /app/packages/shared
+RUN pnpm build
+
+# Build backend
+WORKDIR /app/apps/backend
+RUN pnpm build
+
+# Expose port
+EXPOSE 3001
+
+# Start server
+CMD ["node", "dist/server.js"]

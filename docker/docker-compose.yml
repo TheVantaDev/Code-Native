@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  # Backend API Server
+  backend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.backend
+    ports:
+      - "3001:3001"
+    environment:
+      - PORT=3001
+      - OLLAMA_URL=http://ollama:11434
+      - PROJECT_ROOT=/workspace
+      - CORS_ORIGIN=http://localhost:5173
+    volumes:
+      - ../workspace:/workspace
+    depends_on:
+      - ollama
+    networks:
+      - codenative
+
+  # Ollama LLM Service
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - codenative
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # ChromaDB for RAG (Vector Database)
+  chromadb:
+    image: chromadb/chroma:latest
+    ports:
+      - "8000:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    networks:
+      - codenative
+
+networks:
+  codenative:
+    driver: bridge
+
+volumes:
+  ollama_data:
+  chroma_data:

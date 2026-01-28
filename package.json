@@ -1,44 +1,24 @@
 {
   "name": "code-native",
+  "version": "1.0.0",
   "private": true,
-  "version": "0.0.0",
-  "type": "module",
+  "description": "Enterprise AI-Powered IDE with Local LLM Support",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build && electron-builder",
-    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
-    "preview": "vite preview"
+    "dev": "pnpm run --parallel dev",
+    "dev:desktop": "pnpm --filter desktop dev",
+    "dev:backend": "pnpm --filter backend dev",
+    "build": "pnpm run --parallel build",
+    "build:desktop": "pnpm --filter desktop build",
+    "build:backend": "pnpm --filter backend build",
+    "lint": "pnpm run --parallel lint"
   },
-  "dependencies": {
-    "@monaco-editor/react": "^4.7.0",
-    "@types/react-syntax-highlighter": "^15.5.13",
-    "lucide-react": "^0.562.0",
-    "memfs": "^4.51.1",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "react-markdown": "^10.1.0",
-    "react-syntax-highlighter": "^16.1.0",
-    "zustand": "^5.0.9"
-  },
-  "devDependencies": {
-    "@tailwindcss/postcss": "^4.1.18",
-    "@types/react": "^18.2.64",
-    "@types/react-dom": "^18.2.21",
-    "@typescript-eslint/eslint-plugin": "^7.1.1",
-    "@typescript-eslint/parser": "^7.1.1",
-    "@vitejs/plugin-react": "^4.2.1",
-    "autoprefixer": "^10.4.23",
-    "electron": "^30.0.1",
-    "electron-builder": "^24.13.3",
-    "eslint": "^8.57.0",
-    "eslint-plugin-react-hooks": "^4.6.0",
-    "eslint-plugin-react-refresh": "^0.4.5",
-    "postcss": "^8.5.6",
-    "tailwindcss": "^4.1.18",
-    "typescript": "^5.2.2",
-    "vite": "^5.1.6",
-    "vite-plugin-electron": "^0.28.6",
-    "vite-plugin-electron-renderer": "^0.14.5"
-  },
-  "main": "dist-electron/main.js"
+  "keywords": [
+    "ide",
+    "ai",
+    "ollama",
+    "code-editor",
+    "enterprise"
+  ],
+  "author": "",
+  "license": "MIT"
 }
