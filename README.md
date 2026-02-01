@@ -1,6 +1,6 @@
 # CodeNative - Enterprise AI-Powered IDE
 
-A secure, on-premise, AI-augmented development environment with local LLM support via Ollama.
+A secure, on-premise, AI-augmented development environment with local LLM support via Ollama For Prototype.
 
 ## 🚀 Features
 
