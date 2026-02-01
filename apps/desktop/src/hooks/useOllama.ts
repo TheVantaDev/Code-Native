@@ -1,9 +1,14 @@
 import { useState, useCallback, useEffect } from 'react';
 import { ChatMessage, OllamaModel, OllamaConnectionStatus } from '../types';
 
+interface SendMessageOptions {
+    systemPrompt?: string;
+    context?: string;
+}
+
 interface UseOllamaReturn {
     messages: ChatMessage[];
-    sendMessage: (prompt: string) => Promise<void>;
+    sendMessage: (prompt: string, options?: SendMessageOptions) => Promise<void>;
     isLoading: boolean;
     error: string | null;
     connectionStatus: OllamaConnectionStatus;
@@ -80,7 +85,7 @@ export function useOllama(): UseOllamaReturn {
         fetchModels();
     }, [fetchModels]);
 
-    const sendMessage = useCallback(async (prompt: string) => {
+    const sendMessage = useCallback(async (prompt: string, options?: SendMessageOptions) => {
         if (!prompt.trim()) return;
 
         // Add user message
@@ -111,9 +116,15 @@ export function useOllama(): UseOllamaReturn {
                 .map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
                 .join('\n\n');
 
-            const fullPrompt = conversationContext
+            // Build full prompt with optional project context
+            let fullPrompt = conversationContext
                 ? `${conversationContext}\n\nUser: ${prompt}\n\nAssistant:`
                 : prompt;
+
+            // Prepend project context if provided
+            if (options?.context) {
+                fullPrompt = `${options.context}\n\n---\n\n${fullPrompt}`;
+            }
 
             const response = await fetch(`${OLLAMA_BASE_URL}/api/generate`, {
                 method: 'POST',
@@ -123,6 +134,7 @@ export function useOllama(): UseOllamaReturn {
                 body: JSON.stringify({
                     model: selectedModel,
                     prompt: fullPrompt,
+                    system: options?.systemPrompt, // Pass system prompt to Ollama
                     stream: true,
                 }),
             });

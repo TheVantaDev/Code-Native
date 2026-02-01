@@ -180,6 +180,79 @@ ipcMain.on('window-close', () => {
   if (win) win.close()
 })
 
+// ============ PTY Terminal IPC Handlers ============
+
+import * as pty from 'node-pty'
+
+interface PtyInstance {
+  pty: pty.IPty
+  id: string
+}
+
+const ptyInstances = new Map<string, PtyInstance>()
+let ptyIdCounter = 0
+
+// Create a new PTY terminal
+ipcMain.handle('pty:create', async (_, options?: { cwd?: string; cols?: number; rows?: number }) => {
+  const id = `pty-${++ptyIdCounter}`
+
+  // Determine shell based on platform
+  const shell = process.platform === 'win32' ? 'powershell.exe' : (process.env.SHELL || 'bash')
+  const shellArgs = process.platform === 'win32' ? [] : []
+
+  const ptyProcess = pty.spawn(shell, shellArgs, {
+    name: 'xterm-256color',
+    cols: options?.cols || 80,
+    rows: options?.rows || 24,
+    cwd: options?.cwd || process.env.HOME || process.env.USERPROFILE || '.',
+    env: process.env as { [key: string]: string },
+  })
+
+  ptyInstances.set(id, { pty: ptyProcess, id })
+
+  // Forward PTY output to renderer
+  ptyProcess.onData((data: string) => {
+    if (win) {
+      win.webContents.send('pty:data', { id, data })
+    }
+  })
+
+  ptyProcess.onExit(({ exitCode }) => {
+    ptyInstances.delete(id)
+    if (win) {
+      win.webContents.send('pty:exit', { id, exitCode })
+    }
+  })
+
+  console.log(`✅ PTY created: ${id} (shell: ${shell})`)
+  return { id }
+})
+
+// Write data to PTY
+ipcMain.handle('pty:write', async (_, { id, data }: { id: string; data: string }) => {
+  const instance = ptyInstances.get(id)
+  if (instance) {
+    instance.pty.write(data)
+  }
+})
+
+// Resize PTY
+ipcMain.handle('pty:resize', async (_, { id, cols, rows }: { id: string; cols: number; rows: number }) => {
+  const instance = ptyInstances.get(id)
+  if (instance) {
+    instance.pty.resize(cols, rows)
+  }
+})
+
+// Kill PTY
+ipcMain.handle('pty:kill', async (_, { id }: { id: string }) => {
+  const instance = ptyInstances.get(id)
+  if (instance) {
+    instance.pty.kill()
+    ptyInstances.delete(id)
+  }
+})
+
 // ============ Window Creation ============
 
 function createWindow() {

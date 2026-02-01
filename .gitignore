@@ -24,3 +24,6 @@ release
 *.njsproj
 *.sln
 *.sw?
+
+# Personal/local documentation
+TECHNICAL_DEEP_DIVE.md

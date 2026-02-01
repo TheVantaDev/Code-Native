@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Bot, Trash2, Sparkles, MoreHorizontal, X, StopCircle, RefreshCw, ChevronDown, Copy, Check, Cpu, Wifi, WifiOff, FileEdit, FilePlus, Play } from 'lucide-react';
+import { Send, Bot, Trash2, Sparkles, MoreHorizontal, X, StopCircle, RefreshCw, ChevronDown, Copy, Check, Cpu, Wifi, WifiOff, FileEdit, FilePlus, FolderTree, CheckCircle2, XCircle } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
@@ -7,6 +7,9 @@ import { useOllama } from '../../hooks/useOllama';
 import { useUIStore } from '../../stores/uiStore';
 import { useEditorStore } from '../../stores/editorStore';
 import { useFileSystem } from '../../hooks/useFileSystem';
+import { useAIAgent, hasFileOperations, FileOperation } from '../../hooks/useAIAgent';
+import { buildAIContext, CODING_ASSISTANT_SYSTEM_PROMPT } from '../../services/projectContext';
+import { FileNode } from '../../types';
 
 // Code block component with action buttons
 const CodeBlock: React.FC<{ language?: string; value: string }> = ({ language, value }) => {
@@ -203,9 +206,80 @@ const ConnectionIndicator: React.FC<{ status: 'connected' | 'disconnected' | 'co
     );
 };
 
+// File Operation Card Component - shows pending file changes from AI
+const FileOperationCard: React.FC<{
+    operation: FileOperation;
+    onApply: () => void;
+    onReject: () => void;
+}> = ({ operation, onApply, onReject }) => {
+    const fileName = operation.path.split('/').pop() || operation.path;
+    const statusColors = {
+        pending: 'border-yellow-500/30 bg-yellow-900/10',
+        applied: 'border-green-500/30 bg-green-900/10',
+        rejected: 'border-red-500/30 bg-red-900/10 opacity-50',
+    };
+    const typeLabels = {
+        create: { label: 'CREATE', color: 'text-green-400' },
+        modify: { label: 'MODIFY', color: 'text-blue-400' },
+        delete: { label: 'DELETE', color: 'text-red-400' },
+    };
+
+    return (
+        <div className={`rounded-md border ${statusColors[operation.status]} p-3 my-2`}>
+            <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                    <span className={`text-[10px] font-bold ${typeLabels[operation.type].color}`}>
+                        {typeLabels[operation.type].label}
+                    </span>
+                    <span className="text-[12px] text-gray-300 font-mono">{fileName}</span>
+                </div>
+                {operation.status === 'pending' && (
+                    <div className="flex items-center gap-1">
+                        <button
+                            onClick={onApply}
+                            className="flex items-center gap-1 px-2 py-1 text-[10px] bg-green-600 hover:bg-green-500 text-white rounded transition-colors cursor-pointer border-none"
+                        >
+                            <CheckCircle2 size={12} />
+                            Apply
+                        </button>
+                        <button
+                            onClick={onReject}
+                            className="flex items-center gap-1 px-2 py-1 text-[10px] bg-gray-600 hover:bg-gray-500 text-white rounded transition-colors cursor-pointer border-none"
+                        >
+                            <XCircle size={12} />
+                            Reject
+                        </button>
+                    </div>
+                )}
+                {operation.status === 'applied' && (
+                    <span className="text-[10px] text-green-400 flex items-center gap-1">
+                        <CheckCircle2 size={12} /> Applied
+                    </span>
+                )}
+                {operation.status === 'rejected' && (
+                    <span className="text-[10px] text-gray-500 flex items-center gap-1">
+                        <XCircle size={12} /> Rejected
+                    </span>
+                )}
+            </div>
+            <div className="text-[10px] text-gray-500 font-mono truncate">{operation.path}</div>
+            {operation.content && operation.status === 'pending' && (
+                <div className="mt-2 max-h-[100px] overflow-hidden rounded bg-[#1e1e1e] text-[11px]">
+                    <pre className="p-2 text-gray-400 overflow-hidden">
+                        {operation.content.split('\n').slice(0, 5).join('\n')}
+                        {operation.content.split('\n').length > 5 && '\n...'}
+                    </pre>
+                </div>
+            )}
+        </div>
+    );
+};
+
 // Main AI Panel Component
 export const AIPanel: React.FC = () => {
-    const { isAIPanelOpen, toggleAIPanel } = useUIStore();
+    const { isAIPanelOpen, toggleAIPanel, currentFolderPath } = useUIStore();
+    const { openFiles, activeFileId } = useEditorStore();
+    const { readDir } = useFileSystem();
     const {
         messages,
         sendMessage,
@@ -219,14 +293,43 @@ export const AIPanel: React.FC = () => {
         retryConnection
     } = useOllama();
 
+    // AI Agent for file operations
+    const {
+        pendingOperations,
+        applyOperation,
+        rejectOperation,
+        applyAllOperations,
+        processAIResponse,
+        clearOperations,
+    } = useAIAgent();
+
     const [input, setInput] = useState('');
+    const [includeContext, setIncludeContext] = useState(true);
+    const [projectFiles, setProjectFiles] = useState<FileNode[]>([]);
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+    // Load project files for context
+    useEffect(() => {
+        if (currentFolderPath) {
+            readDir(currentFolderPath).then(setProjectFiles).catch(console.error);
+        }
+    }, [currentFolderPath, readDir]);
+
+    // Process latest AI message for file operations
+    useEffect(() => {
+        const lastMessage = messages[messages.length - 1];
+        if (lastMessage?.role === 'assistant' && !isLoading) {
+            if (hasFileOperations(lastMessage.content)) {
+                processAIResponse(lastMessage.content);
+            }
+        }
+    }, [messages, isLoading, processAIResponse]);
 
     // Auto-scroll to bottom
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [messages]);
+    }, [messages, pendingOperations]);
 
     // Auto-resize textarea
     useEffect(() => {
@@ -238,13 +341,42 @@ export const AIPanel: React.FC = () => {
 
     if (!isAIPanelOpen) return null;
 
+    // Build context for AI
+    const currentFile = openFiles.find(f => f.id === activeFileId);
+    const aiContext = includeContext ? buildAIContext({
+        projectStructure: projectFiles,
+        currentFile: currentFile ? {
+            name: currentFile.name,
+            path: currentFile.path,
+            content: currentFile.content,
+            language: currentFile.language,
+        } : undefined,
+        openFiles: openFiles.map(f => ({
+            name: f.name,
+            path: f.path,
+            language: f.language,
+            isDirty: f.isDirty,
+        })),
+    }) : undefined;
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!input.trim() || isLoading) return;
         const msg = input;
         setInput('');
-        await sendMessage(msg);
+        await sendMessage(msg, {
+            systemPrompt: CODING_ASSISTANT_SYSTEM_PROMPT,
+            context: aiContext,
+        });
     };
+
+    const handleClearAll = () => {
+        clearMessages();
+        clearOperations();
+    };
+
+    // Count pending operations
+    const pendingCount = pendingOperations.filter(op => op.status === 'pending').length;
 
     return (
         <div className="flex flex-col w-[380px] h-full bg-[var(--vscode-sideBar-bg)] border-l border-[var(--vscode-panel-border)] shadow-xl relative z-20">
@@ -256,8 +388,21 @@ export const AIPanel: React.FC = () => {
                         <span>AI Assistant</span>
                     </div>
                     <ConnectionIndicator status={connectionStatus} />
+                    {pendingCount > 0 && (
+                        <span className="px-1.5 py-0.5 text-[9px] font-bold bg-yellow-600 text-white rounded">
+                            {pendingCount} pending
+                        </span>
+                    )}
                 </div>
                 <div className="flex items-center gap-1">
+                    {/* Context Toggle */}
+                    <button
+                        onClick={() => setIncludeContext(!includeContext)}
+                        className={`p-1 rounded hover:bg-[rgba(255,255,255,0.1)] transition-opacity border-none bg-transparent cursor-pointer ${includeContext ? 'text-green-400' : 'text-[var(--vscode-fg)] opacity-40'}`}
+                        title={includeContext ? 'Context: ON (includes files)' : 'Context: OFF'}
+                    >
+                        <FolderTree size={14} />
+                    </button>
                     {connectionStatus === 'disconnected' && (
                         <button
                             onClick={retryConnection}
@@ -268,7 +413,7 @@ export const AIPanel: React.FC = () => {
                         </button>
                     )}
                     <button
-                        onClick={clearMessages}
+                        onClick={handleClearAll}
                         className="p-1 rounded hover:bg-[rgba(255,255,255,0.1)] text-[var(--vscode-fg)] opacity-70 hover:opacity-100 transition-opacity border-none bg-transparent cursor-pointer"
                         title="Clear Session"
                     >
@@ -402,6 +547,33 @@ export const AIPanel: React.FC = () => {
                                     </div>
                                 </div>
                             </div>
+                        ))}
+                    </div>
+                )}
+
+                {/* Pending File Operations */}
+                {pendingOperations.length > 0 && (
+                    <div className="mx-2 mt-4">
+                        <div className="flex items-center justify-between mb-2">
+                            <span className="text-[11px] font-semibold text-[var(--vscode-fg)]">
+                                File Operations
+                            </span>
+                            {pendingCount > 0 && (
+                                <button
+                                    onClick={applyAllOperations}
+                                    className="text-[10px] px-2 py-1 bg-green-600 hover:bg-green-500 text-white rounded transition-colors cursor-pointer border-none"
+                                >
+                                    Apply All ({pendingCount})
+                                </button>
+                            )}
+                        </div>
+                        {pendingOperations.map(op => (
+                            <FileOperationCard
+                                key={op.id}
+                                operation={op}
+                                onApply={() => applyOperation(op.id)}
+                                onReject={() => rejectOperation(op.id)}
+                            />
                         ))}
                     </div>
                 )}
