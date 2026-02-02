@@ -17,25 +17,36 @@ const StatusItem: React.FC<{
     </div>
 );
 
-// Ollama Status Component (Self-contained for now)
+// Backend Connection Status Component
 const OllamaStatus: React.FC = () => {
-    // This would ideally come from a global store, but for now we'll simulate
     const [status, setStatus] = React.useState<'connected' | 'disconnected' | 'checking'>('checking');
     const [model, setModel] = React.useState<string>('');
 
     React.useEffect(() => {
         const checkConnection = async () => {
             try {
-                const response = await fetch('http://localhost:11434/api/tags');
-                if (response.ok) {
-                    const data = await response.json();
-                    setStatus('connected');
-                    // Get saved model or first available
-                    const savedModel = localStorage.getItem('codenative_ollama_model');
-                    if (savedModel) {
-                        setModel(savedModel);
-                    } else if (data.models && data.models.length > 0) {
-                        setModel(data.models[0].name);
+                // Check backend health first
+                const healthResponse = await fetch('http://localhost:3001/health');
+                if (!healthResponse.ok) {
+                    setStatus('disconnected');
+                    return;
+                }
+
+                // Then check models via backend
+                const modelsResponse = await fetch('http://localhost:3001/api/ai/models');
+                if (modelsResponse.ok) {
+                    const result = await modelsResponse.json();
+                    if (result.success && result.data) {
+                        setStatus('connected');
+                        // Get saved model or first available
+                        const savedModel = localStorage.getItem('codenative_ollama_model');
+                        if (savedModel) {
+                            setModel(savedModel);
+                        } else if (result.data.length > 0) {
+                            setModel(result.data[0].name);
+                        }
+                    } else {
+                        setStatus('disconnected');
                     }
                 } else {
                     setStatus('disconnected');
