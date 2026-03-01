@@ -20,5 +20,8 @@
     "enterprise"
   ],
   "author": "",
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "ws": "^8.19.0"
+  }
 }

@@ -76,19 +76,38 @@ export function setupWebSocket(io: SocketIOServer) {
         });
 
         // Code changes
-        socket.on(WS_EVENTS.CODE_CHANGE, (change: CollabChange) => {
-            if (currentRoomId) {
-                const room = rooms.get(currentRoomId);
-                if (room) {
-                    // Apply changes to room content (simplified - in production use OT/CRDT)
-                    // For now, broadcast the change to other users
-                    socket.to(currentRoomId).emit(WS_EVENTS.CODE_CHANGE, {
-                        ...change,
-                        userId: socket.id,
-                        timestamp: Date.now(),
-                    });
-                }
-            }
+
+        //broadcasting now. CRDT remains...
+        // In this implementation, the BACKEND is the authoritative source of truth for the file content inside a collaboration room.
+        //
+        // How it works:
+        // 1. Whenever a user edits the file, the FULL file content is sent to the backend.
+        // 2. The backend updates room.content (this becomes the official version).
+        // 3. The backend then broadcasts this updated content to all other users.
+        //
+        // Important Behavior:
+        // * The backend always stores the latest version of the file.
+        // * If two users edit the same line at the same time, the edit that reaches the backend LAST will overwrite the previous one.
+        // * This is called a "last-write-wins" strategy.
+        //
+        // Future Improvement:
+        // * For true conflict resolution and simultaneous editing support, we will upgrade to a CRDT-based system (e.g., Yjs).
+
+        socket.on(WS_EVENTS.CODE_CHANGE, ({ content }) => {
+            if (!currentRoomId) return;
+
+            const room = rooms.get(currentRoomId);
+            if (!room) return;
+
+            //  1. Update authoritative room state
+            room.content = content;
+
+            //  2. Broadcast updated full content to others
+            socket.to(currentRoomId).emit(WS_EVENTS.CODE_CHANGE, {
+                content,
+                userId: socket.id,
+                timestamp: Date.now(),
+            });
         });
 
         // Sync request
