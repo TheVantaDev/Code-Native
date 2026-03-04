@@ -27,6 +27,11 @@ let win: BrowserWindow | null
 
 // ============ IPC Handlers for File System ============
 
+// Simple ping to verify Electron backend is active
+ipcMain.handle('fs:ping', () => {
+  return true;
+})
+
 // Read file contents
 ipcMain.handle('fs:readFile', async (_, filePath: string) => {
   try {

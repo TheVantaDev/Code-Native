@@ -4,36 +4,62 @@ import { useFileSystem } from '../../hooks/useFileSystem';
 import { useEditorStore } from '../../stores/editorStore';
 import { FileNode } from '../../types';
 
-// Simple file icon component with colored extensions
+// File icon colors matching popular icon themes
+const getFileIconColor = (name: string): string => {
+    const ext = name.split('.').pop()?.toLowerCase() || '';
+    const colors: Record<string, string> = {
+        ts: '#3178c6',
+        tsx: '#3178c6',
+        js: '#e5c07b',
+        jsx: '#61afef',
+        json: '#e0af68',
+        css: '#bb9af7',
+        scss: '#c586c0',
+        less: '#bb9af7',
+        html: '#e34c26',
+        xml: '#e34c26',
+        md: '#7dcfff',
+        py: '#9ece6a',
+        go: '#7dcfff',
+        rs: '#f7768e',
+        java: '#f7768e',
+        c: '#7dcfff',
+        cpp: '#7dcfff',
+        h: '#7dcfff',
+        rb: '#f7768e',
+        php: '#bb9af7',
+        yaml: '#e0af68',
+        yml: '#e0af68',
+        toml: '#e0af68',
+        env: '#e0af68',
+        sh: '#9ece6a',
+        bat: '#9ece6a',
+        svg: '#e0af68',
+        png: '#9ece6a',
+        jpg: '#9ece6a',
+        gif: '#9ece6a',
+        lock: '#565f89',
+        gitignore: '#565f89',
+    };
+    return colors[ext] || '#a9b1d6';
+};
+
+// Simple file icon component
 const FileIcon: React.FC<{ name: string; isFolder?: boolean; isOpen?: boolean }> = ({
     name,
     isFolder,
     isOpen
 }) => {
     if (isFolder) {
+        const color = '#e0af68';
         return isOpen ? (
-            <FolderOpen size={16} fill="#dcb67a" stroke="#dcb67a" />
+            <FolderOpen size={16} fill={color} stroke={color} style={{ opacity: 0.9 }} />
         ) : (
-            <Folder size={16} fill="#dcb67a" stroke="#dcb67a" />
+            <Folder size={16} fill={color} stroke={color} style={{ opacity: 0.8 }} />
         );
     }
 
-    const ext = name.split('.').pop()?.toLowerCase() || '';
-    let color = '#cccccc'; // Default file color
-
-    switch (ext) {
-        case 'ts': case 'tsx': color = '#3178c6'; break;
-        case 'js': case 'jsx': color = '#f1e05a'; break;
-        case 'css': case 'scss': case 'less': color = '#563d7c'; break;
-        case 'html': case 'xml': color = '#e34c26'; break;
-        case 'json': color = '#cbcb41'; break;
-        case 'md': color = '#3572A5'; break; // Markdown blue
-        case 'py': color = '#3572A5'; break;
-        case 'go': color = '#00ADD8'; break;
-        default: color = '#cccccc';
-    }
-
-    return <File size={16} stroke={color} strokeWidth={1.5} />;
+    return <File size={16} stroke={getFileIconColor(name)} strokeWidth={1.5} />;
 };
 
 const getLanguage = (name: string): string => {
@@ -53,11 +79,9 @@ interface TreeItemProps {
 }
 
 const TreeItem: React.FC<TreeItemProps> = ({ node, depth }) => {
-    const [isExpanded, setIsExpanded] = useState(false); // Default collapsed for files, verify logic below
+    const [isExpanded, setIsExpanded] = useState(false);
     const { openFile, activeFileId } = useEditorStore();
     const { readFile } = useFileSystem();
-
-    // Auto expand folders if depth 0? No, let's keep it manual like VS Code
 
     const isSelected = node.id === activeFileId;
 
@@ -77,7 +101,7 @@ const TreeItem: React.FC<TreeItemProps> = ({ node, depth }) => {
         }
     };
 
-    const paddingLeft = depth * 10 + 10; // 10px indentation step + base padding
+    const paddingLeft = depth * 12 + 12;
 
     return (
         <>
@@ -89,12 +113,24 @@ const TreeItem: React.FC<TreeItemProps> = ({ node, depth }) => {
                 className={`list-item ${isSelected ? 'selected' : ''}`}
                 style={{ paddingLeft: `${paddingLeft}px` }}
             >
-                {/* Indent content */}
+                {/* Indent guides */}
+                {depth > 0 && Array.from({ length: depth }).map((_, i) => (
+                    <div
+                        key={i}
+                        className="indent-guide"
+                        style={{ left: `${(i + 1) * 12 + 5}px` }}
+                    />
+                ))}
+
+                {/* Content */}
                 <div className="flex items-center gap-1.5 w-full">
                     {/* Twistie / Chevron */}
-                    <span className="flex-shrink-0 w-4 h-4 flex items-center justify-center opacity-80">
+                    <span className="flex-shrink-0 w-4 h-4 flex items-center justify-center"
+                        style={{ opacity: 0.7, transition: 'transform 0.15s ease' }}>
                         {node.type === 'folder' && (
-                            isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />
+                            isExpanded ?
+                                <ChevronDown size={14} /> :
+                                <ChevronRight size={14} />
                         )}
                     </span>
 
@@ -104,7 +140,7 @@ const TreeItem: React.FC<TreeItemProps> = ({ node, depth }) => {
                     </span>
 
                     {/* Label */}
-                    <span className="truncate">{node.name}</span>
+                    <span className="truncate text-[13px]">{node.name}</span>
                 </div>
             </div>
 
@@ -125,7 +161,6 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({ folderPath }) => {
     const { readDir } = useFileSystem();
 
     const loadFiles = useCallback(async () => {
-        // Use provided folder path or default to '/' (which maps to APP_ROOT)
         const pathToRead = folderPath || '/';
         const tree = await readDir(pathToRead);
         setFiles(tree);

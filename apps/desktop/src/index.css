@@ -1,93 +1,117 @@
 @import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 /* ============================================
-   VS Code Dark+ Theme - Enhanced
+   CodeNative Dark Theme - Premium
    ============================================ */
 :root {
-  /* Base Colors */
-  --vscode-bg: #1e1e1e;
-  --vscode-fg: #cccccc;
-  --vscode-border: #2b2b2b;
-  --vscode-focusBorder: #007fd4;
-  --vscode-widget-shadow: 0 0 8px 2px rgba(0, 0, 0, 0.6);
+  /* Base Colors - Richer, deeper tones */
+  --vscode-bg: #1a1b26;
+  --vscode-fg: #c0caf5;
+  --vscode-border: #292e42;
+  --vscode-focusBorder: #7aa2f7;
+  --vscode-widget-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
 
   /* Title Bar */
-  --vscode-titleBar-activeBg: #3c3c3c;
-  --vscode-titleBar-activeFg: #cccccc;
-  --vscode-titleBar-inactiveBg: #3c3c3c;
-  --vscode-titleBar-inactiveFg: #999999;
+  --vscode-titleBar-activeBg: #16171f;
+  --vscode-titleBar-activeFg: #c0caf5;
+  --vscode-titleBar-inactiveBg: #16171f;
+  --vscode-titleBar-inactiveFg: #565f89;
 
   /* Activity Bar */
-  --vscode-activityBar-bg: #333333;
-  --vscode-activityBar-fg: #ffffff;
-  --vscode-activityBar-inactiveFg: rgba(255, 255, 255, 0.4);
-  --vscode-activityBar-border: #252526;
-  --vscode-activityBar-activeBorder: #ffffff;
-  --vscode-activityBarBadge-bg: #007acc;
-  --vscode-activityBarBadge-fg: #ffffff;
+  --vscode-activityBar-bg: #16171f;
+  --vscode-activityBar-fg: #c0caf5;
+  --vscode-activityBar-inactiveFg: rgba(192, 202, 245, 0.35);
+  --vscode-activityBar-border: #16171f;
+  --vscode-activityBar-activeBorder: #7aa2f7;
+  --vscode-activityBarBadge-bg: #7aa2f7;
+  --vscode-activityBarBadge-fg: #1a1b26;
 
   /* Side Bar */
-  --vscode-sideBar-bg: #252526;
-  --vscode-sideBar-fg: #cccccc;
-  --vscode-sideBar-border: #252526;
-  --vscode-sideBarTitle-fg: #bbbbbb;
-  --vscode-sideBarSectionHeader-bg: #00000000;
-  --vscode-sideBarSectionHeader-fg: #bbbbbb;
+  --vscode-sideBar-bg: #1e1f2e;
+  --vscode-sideBar-fg: #a9b1d6;
+  --vscode-sideBar-border: #292e42;
+  --vscode-sideBarTitle-fg: #7aa2f7;
+  --vscode-sideBarSectionHeader-bg: transparent;
+  --vscode-sideBarSectionHeader-fg: #c0caf5;
 
   /* Editor Group & Tabs */
-  --vscode-editorGroupHeader-tabsBg: #252526;
-  --vscode-tab-bg: #2d2d2d;
-  --vscode-tab-fg: #969696;
-  --vscode-tab-border: #252526;
-  --vscode-tab-activeBg: #1e1e1e;
-  --vscode-tab-activeFg: #ffffff;
-  --vscode-tab-activeBorderTop: #007acc;
-  --vscode-tab-hoverBg: #2d2d2d;
+  --vscode-editorGroupHeader-tabsBg: #16171f;
+  --vscode-tab-bg: #1e1f2e;
+  --vscode-tab-fg: #565f89;
+  --vscode-tab-border: #292e42;
+  --vscode-tab-activeBg: #1a1b26;
+  --vscode-tab-activeFg: #c0caf5;
+  --vscode-tab-activeBorderTop: #7aa2f7;
+  --vscode-tab-hoverBg: #24253a;
 
   /* Editor */
-  --vscode-editor-bg: #1e1e1e;
-  --vscode-editor-fg: #d4d4d4;
-  --vscode-editorLineNumber-fg: #858585;
-  --vscode-editorLineNumber-activeFg: #c6c6c6;
+  --vscode-editor-bg: #1a1b26;
+  --vscode-editor-fg: #c0caf5;
+  --vscode-editorLineNumber-fg: #3b4261;
+  --vscode-editorLineNumber-activeFg: #737aa2;
 
   /* Lists & Trees */
-  --vscode-list-hoverBg: #2a2d2e;
-  --vscode-list-hoverFg: #cccccc;
-  --vscode-list-activeSelectionBg: #37373d;
-  --vscode-list-activeSelectionFg: #ffffff;
-  --vscode-list-focusBg: #04395e;
-  --vscode-list-focusFg: #ffffff;
-  --vscode-tree-indentGuidesStroke: #585858;
+  --vscode-list-hoverBg: rgba(122, 162, 247, 0.06);
+  --vscode-list-hoverFg: #c0caf5;
+  --vscode-list-activeSelectionBg: rgba(122, 162, 247, 0.12);
+  --vscode-list-activeSelectionFg: #c0caf5;
+  --vscode-list-focusBg: rgba(122, 162, 247, 0.15);
+  --vscode-list-focusFg: #c0caf5;
+  --vscode-tree-indentGuidesStroke: #292e42;
 
   /* Status Bar */
-  --vscode-statusBar-bg: #007acc;
-  --vscode-statusBar-fg: #ffffff;
-  --vscode-statusBar-hoverBg: rgba(255, 255, 255, 0.12);
-  --vscode-statusBar-remoteBg: #16825d;
+  --vscode-statusBar-bg: #16171f;
+  --vscode-statusBar-fg: #565f89;
+  --vscode-statusBar-hoverBg: rgba(122, 162, 247, 0.12);
+  --vscode-statusBar-remoteBg: #7aa2f7;
 
   /* Panel */
-  --vscode-panel-border: #2b2b2b;
+  --vscode-panel-border: #292e42;
 
   /* Inputs & Badges */
-  --vscode-input-bg: #3c3c3c;
-  --vscode-input-fg: #cccccc;
-  --vscode-input-border: #3c3c3c;
-  --vscode-input-placeholderFg: #a6a6a6;
-  --vscode-badge-bg: #4d4d4d;
-  --vscode-badge-fg: #ffffff;
+  --vscode-input-bg: #1e1f2e;
+  --vscode-input-fg: #c0caf5;
+  --vscode-input-border: #292e42;
+  --vscode-input-placeholderFg: #565f89;
+  --vscode-badge-bg: #7aa2f7;
+  --vscode-badge-fg: #1a1b26;
 
   /* Scrollbar */
-  --vscode-scrollbar-sliderBg: rgba(121, 121, 121, 0.4);
-  --vscode-scrollbar-sliderHoverBg: rgba(100, 100, 100, 0.7);
-  --vscode-scrollbar-sliderActiveBg: rgba(191, 191, 191, 0.4);
+  --vscode-scrollbar-sliderBg: rgba(122, 162, 247, 0.1);
+  --vscode-scrollbar-sliderHoverBg: rgba(122, 162, 247, 0.2);
+  --vscode-scrollbar-sliderActiveBg: rgba(122, 162, 247, 0.3);
 
-  /* AI Panel */
-  --ai-accent: #007acc;
-  --ai-accent-hover: #005a9e;
+  /* AI Panel - Accent Colors */
+  --ai-accent: #7aa2f7;
+  --ai-accent-hover: #5d8cf0;
+  --ai-accent-glow: rgba(122, 162, 247, 0.3);
+  --ai-gradient: linear-gradient(135deg, #7aa2f7, #bb9af7);
+
+  /* Status Colors */
+  --color-success: #9ece6a;
+  --color-warning: #e0af68;
+  --color-error: #f7768e;
+  --color-info: #7dcfff;
 
   /* Fonts */
-  --font-sans: 'Segoe UI', 'SF UI Text', 'Helvetica Neue', 'Helvetica', 'Arial', sans-serif;
-  --font-mono: 'Cascadia Code', 'Fira Code', 'Menlo', 'Monaco', 'Consolas', 'Courier New', monospace;
+  --font-sans: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+
+  /* Spacing */
+  --panel-gap: 1px;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.5);
+  --shadow-glow: 0 0 20px rgba(122, 162, 247, 0.15);
+
+  /* Radii */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
 }
 
 /* ============================================
@@ -112,6 +136,13 @@ body,
   font-family: var(--font-sans);
   font-size: 13px;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: rgba(122, 162, 247, 0.25);
+  color: #c0caf5;
 }
 
 /* ============================================
@@ -146,6 +177,7 @@ body,
   display: flex;
   flex-direction: column;
   justify-content: space-between;
+  border-right: 1px solid var(--vscode-border);
 }
 
 .activity-item {
@@ -156,14 +188,14 @@ body,
   justify-content: center;
   position: relative;
   cursor: pointer;
-  opacity: 0.6;
-  transition: opacity 0.15s ease, background-color 0.15s ease;
+  opacity: 0.45;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   color: var(--vscode-activityBar-fg);
 }
 
 .activity-item:hover {
-  opacity: 1;
-  background-color: rgba(255, 255, 255, 0.05);
+  opacity: 0.9;
+  background-color: rgba(122, 162, 247, 0.06);
 }
 
 .activity-item.active {
@@ -174,20 +206,21 @@ body,
   content: '';
   position: absolute;
   left: 0;
-  top: 0;
-  bottom: 0;
+  top: 6px;
+  bottom: 6px;
   width: 2px;
-  background-color: var(--vscode-activityBar-activeBorder);
+  border-radius: 0 2px 2px 0;
+  background: var(--ai-gradient);
 }
 
 .activity-badge {
   position: absolute;
-  bottom: 8px;
+  bottom: 7px;
   right: 4px;
-  background-color: var(--vscode-activityBarBadge-bg);
+  background: var(--ai-gradient);
   color: var(--vscode-activityBarBadge-fg);
   font-size: 9px;
-  font-weight: 600;
+  font-weight: 700;
   min-width: 16px;
   height: 16px;
   border-radius: 8px;
@@ -195,6 +228,7 @@ body,
   align-items: center;
   justify-content: center;
   padding: 0 4px;
+  box-shadow: 0 2px 8px rgba(122, 162, 247, 0.3);
 }
 
 /* ============================================
@@ -209,32 +243,33 @@ body,
 }
 
 .sidebar-title {
-  height: 35px;
-  padding: 0 20px;
+  height: 36px;
+  padding: 0 16px;
   display: flex;
   align-items: center;
   font-size: 11px;
-  font-weight: 400;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.08em;
   color: var(--vscode-sideBarTitle-fg);
 }
 
 .sidebar-section-header {
-  height: 22px;
+  height: 24px;
   display: flex;
   align-items: center;
   padding: 0 4px;
   cursor: pointer;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--vscode-sideBarSectionHeader-fg);
   font-size: 11px;
   text-transform: uppercase;
-  transition: background-color 0.1s ease;
+  letter-spacing: 0.04em;
+  transition: background-color 0.15s ease;
 }
 
 .sidebar-section-header:hover {
-  background-color: rgba(255, 255, 255, 0.05);
+  background-color: rgba(122, 162, 247, 0.06);
 }
 
 .sidebar-section-icon {
@@ -243,14 +278,14 @@ body,
   align-items: center;
   justify-content: center;
   margin-right: 4px;
-  transition: transform 0.15s ease;
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* ============================================
    Tree / List
    ============================================ */
 .list-item {
-  height: 22px;
+  height: 24px;
   display: flex;
   align-items: center;
   padding-right: 10px;
@@ -258,7 +293,8 @@ body,
   color: var(--vscode-sideBar-fg);
   font-size: 13px;
   position: relative;
-  transition: background-color 0.1s ease;
+  transition: all 0.12s ease;
+  border-radius: 0;
 }
 
 .list-item:hover {
@@ -268,6 +304,17 @@ body,
 .list-item.selected {
   background-color: var(--vscode-list-activeSelectionBg);
   color: var(--vscode-list-activeSelectionFg);
+}
+
+.list-item.selected::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--ai-accent);
+  border-radius: 0 1px 1px 0;
 }
 
 .list-item.focused {
@@ -281,24 +328,29 @@ body,
   bottom: 0;
   width: 1px;
   background-color: var(--vscode-tree-indentGuidesStroke);
-  opacity: 0.4;
+  opacity: 0.5;
 }
 
 /* ============================================
    Editor Group (Tabs)
    ============================================ */
 .editor-group-header {
-  height: 35px;
+  height: 36px;
   background-color: var(--vscode-editorGroupHeader-tabsBg);
   display: flex;
   overflow-x: auto;
+  border-bottom: 1px solid var(--vscode-border);
+}
+
+.editor-group-header::-webkit-scrollbar {
+  height: 0;
 }
 
 .tab {
   height: 100%;
   display: flex;
   align-items: center;
-  padding: 0 10px;
+  padding: 0 12px;
   min-width: 120px;
   max-width: 200px;
   background-color: var(--vscode-tab-bg);
@@ -307,11 +359,12 @@ body,
   cursor: pointer;
   font-size: 13px;
   position: relative;
-  transition: background-color 0.1s ease;
+  transition: all 0.15s ease;
 }
 
 .tab:hover {
   background-color: var(--vscode-tab-hoverBg);
+  color: var(--vscode-tab-activeFg);
 }
 
 .tab.active {
@@ -325,8 +378,9 @@ body,
   top: 0;
   left: 0;
   right: 0;
-  height: 1px;
-  background-color: var(--vscode-tab-activeBorderTop);
+  height: 2px;
+  background: var(--ai-gradient);
+  border-radius: 0 0 2px 2px;
 }
 
 .tab-icon {
@@ -342,56 +396,63 @@ body,
 }
 
 .tab-close {
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   margin-left: 6px;
   opacity: 0;
-  transition: opacity 0.15s ease, background-color 0.1s ease;
+  transition: all 0.15s ease;
+  color: var(--vscode-tab-fg);
 }
 
 .tab:hover .tab-close {
-  opacity: 1;
+  opacity: 0.7;
 }
 
 .tab-close:hover {
-  background-color: rgba(255, 255, 255, 0.15);
+  background-color: rgba(247, 118, 142, 0.15);
+  color: var(--color-error);
+  opacity: 1 !important;
 }
 
 .tab-dirty {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background-color: var(--vscode-fg);
+  background-color: var(--ai-accent);
   margin-left: 6px;
+  animation: pulse-glow 2s ease-in-out infinite;
 }
 
 /* ============================================
    Breadcrumb
    ============================================ */
 .breadcrumb {
-  height: 22px;
+  height: 24px;
   display: flex;
   align-items: center;
   padding: 0 16px;
   background-color: var(--vscode-editor-bg);
-  font-size: 13px;
+  font-size: 12px;
   color: var(--vscode-fg);
+  border-bottom: 1px solid var(--vscode-border);
 }
 
 .breadcrumb-item {
   display: flex;
   align-items: center;
   cursor: pointer;
-  opacity: 0.8;
-  transition: opacity 0.1s ease;
+  opacity: 0.6;
+  transition: all 0.15s ease;
+  font-size: 12px;
 }
 
 .breadcrumb-item:hover {
   opacity: 1;
+  color: var(--ai-accent);
 }
 
 /* ============================================
@@ -407,23 +468,27 @@ body,
    Status Bar
    ============================================ */
 .status-bar {
-  height: 22px;
-  background-color: var(--vscode-statusBar-bg);
+  height: 24px;
+  background: linear-gradient(90deg, var(--vscode-statusBar-bg), #1a1c2e);
   color: var(--vscode-statusBar-fg);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 8px;
+  padding: 0;
   font-size: 12px;
+  border-top: 1px solid var(--vscode-border);
 }
 
 .status-bar-item {
-  padding: 0 8px;
+  padding: 0 10px;
   height: 100%;
   display: flex;
   align-items: center;
   cursor: pointer;
-  transition: background-color 0.1s ease;
+  transition: all 0.15s ease;
+  position: relative;
+  font-size: 11px;
+  gap: 4px;
 }
 
 .status-bar-item:hover {
@@ -434,13 +499,15 @@ body,
    Scrollbar (Webkit)
    ============================================ */
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-thumb {
   background-color: var(--vscode-scrollbar-sliderBg);
-  border-radius: 5px;
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: content-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
@@ -461,52 +528,74 @@ body,
 
 /* Custom thin scrollbar for panels */
 .custom-scrollbar::-webkit-scrollbar {
-  width: 8px;
+  width: 6px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background-color: rgba(121, 121, 121, 0.3);
-  border-radius: 4px;
+  background-color: rgba(122, 162, 247, 0.1);
+  border-radius: 3px;
+  border: none;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(121, 121, 121, 0.5);
+  background-color: rgba(122, 162, 247, 0.2);
 }
 
 /* ============================================
    Animations
    ============================================ */
 @keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
 
-  0%,
-  100% {
+@keyframes pulse-glow {
+  0%, 100% { 
     opacity: 1;
+    box-shadow: 0 0 4px rgba(122, 162, 247, 0.2);
   }
-
-  50% {
-    opacity: 0.5;
+  50% { 
+    opacity: 0.6;
+    box-shadow: 0 0 8px rgba(122, 162, 247, 0.5);
   }
 }
 
 @keyframes bounce {
-
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-
-  50% {
-    transform: translateY(-25%);
-  }
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
 }
 
 @keyframes spin {
-  from {
-    transform: rotate(0deg);
-  }
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
 
-  to {
-    transform: rotate(360deg);
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-6px); }
+}
+
+@keyframes glow-pulse {
+  0%, 100% { 
+    filter: drop-shadow(0 0 4px rgba(122, 162, 247, 0.3));
+  }
+  50% { 
+    filter: drop-shadow(0 0 12px rgba(122, 162, 247, 0.6));
   }
 }
 
@@ -515,11 +604,27 @@ body,
 }
 
 .animate-bounce {
-  animation: bounce 1s infinite;
+  animation: bounce 1.2s ease-in-out infinite;
 }
 
 .animate-spin {
   animation: spin 1s linear infinite;
+}
+
+.animate-fade-in {
+  animation: fade-in 0.2s ease-out;
+}
+
+.animate-slide-up {
+  animation: slide-up 0.3s ease-out;
+}
+
+.animate-float {
+  animation: float 4s ease-in-out infinite;
+}
+
+.animate-glow {
+  animation: glow-pulse 2s ease-in-out infinite;
 }
 
 /* ============================================
@@ -531,15 +636,18 @@ body,
 
 .prose-sm p {
   font-size: 13px;
+  line-height: 1.7;
 }
 
 .prose a {
-  color: #3794ff;
-  text-decoration: underline;
+  color: var(--ai-accent);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(122, 162, 247, 0.3);
+  transition: border-color 0.15s ease;
 }
 
 .prose a:hover {
-  color: #4da6ff;
+  border-color: var(--ai-accent);
 }
 
 .prose strong {
@@ -554,6 +662,10 @@ body,
 .prose code {
   font-family: var(--font-mono);
   font-size: 12px;
+  background: rgba(122, 162, 247, 0.08);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  color: #bb9af7;
 }
 
 .prose pre {
@@ -572,19 +684,26 @@ body,
 }
 
 .prose blockquote {
-  border-left: 3px solid #007acc;
+  border-left: 3px solid var(--ai-accent);
   padding-left: 12px;
   margin: 8px 0;
   opacity: 0.9;
 }
 
 /* ============================================
-   Glassmorphism Effects (Subtle)
+   Glassmorphism Effects
    ============================================ */
 .glass {
-  background: rgba(30, 30, 30, 0.8);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  background: rgba(26, 27, 38, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(122, 162, 247, 0.08);
+}
+
+.glass-subtle {
+  background: rgba(30, 31, 46, 0.6);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
 /* ============================================
@@ -601,7 +720,7 @@ textarea:focus-visible {
    Transitions
    ============================================ */
 .transition-all {
-  transition: all 0.15s ease;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .transition-colors {
@@ -613,5 +732,98 @@ textarea:focus-visible {
 }
 
 .transition-transform {
-  transition: transform 0.15s ease;
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ============================================
+   Terminal Panel
+   ============================================ */
+.terminal-panel {
+  position: relative;
+}
+
+.terminal-resize-handle {
+  position: absolute;
+  top: -3px;
+  left: 0;
+  right: 0;
+  height: 6px;
+  cursor: ns-resize;
+  z-index: 10;
+  transition: background-color 0.15s ease;
+}
+
+.terminal-resize-handle:hover {
+  background-color: var(--ai-accent);
+}
+
+.terminal-resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 32px;
+  height: 3px;
+  border-radius: 2px;
+  background-color: rgba(122, 162, 247, 0);
+  transition: background-color 0.15s ease;
+}
+
+.terminal-resize-handle:hover::after {
+  background-color: rgba(122, 162, 247, 0.5);
+}
+
+/* ============================================
+   Tooltip
+   ============================================ */
+.tooltip-wrapper {
+  position: relative;
+}
+
+.tooltip-content {
+  position: absolute;
+  left: calc(100% + 8px);
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 4px 10px;
+  background: #292e42;
+  color: #c0caf5;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: var(--radius-md);
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  transform: translateY(-50%) translateX(-4px);
+  box-shadow: var(--shadow-md);
+  border: 1px solid rgba(122, 162, 247, 0.1);
+  z-index: 1000;
+}
+
+.tooltip-wrapper:hover .tooltip-content {
+  opacity: 1;
+  transform: translateY(-50%) translateX(0);
+}
+
+/* ============================================
+   Menu Dropdown
+   ============================================ */
+.dropdown-menu {
+  animation: fade-in 0.15s ease-out;
+  background: #1e1f2e;
+  border: 1px solid var(--vscode-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  backdrop-filter: blur(16px);
+  overflow: hidden;
+}
+
+.dropdown-item {
+  transition: all 0.1s ease;
+}
+
+.dropdown-item:hover {
+  background-color: rgba(122, 162, 247, 0.1);
 }

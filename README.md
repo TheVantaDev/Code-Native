@@ -1,6 +1,75 @@
-# CodeNative - Enterprise AI-Powered IDE
+# CodeNative IDE
 
-A secure, on-premise, AI-augmented development environment with local LLM support via Ollama For Prototype.
+> **Enterprise AI-Powered IDE with Local LLM Support**
+
+A fully open-source, privacy-first code editor that brings AI coding assistance to your machine without sending your code to the cloud.
+
+---
+
+## 🎯 What Makes This Different
+
+| Feature | VS Code + Copilot | Cursor | **CodeNative** |
+|---------|-------------------|--------|----------------|
+| AI Provider | GitHub (cloud) | Multiple (cloud) | **Local (Ollama)** |
+| Data Privacy | ❌ Code sent to servers | ❌ Code sent to servers | ✅ **100% local** |
+| Cost | $10-19/month | $20/month | **Free forever** |
+| Internet Required | Yes | Yes | **No** |
+| Works Offline | No | No | **Yes** |
+| Custom Models | No | Limited | **Any Ollama model** |
+| Self-Hostable | No | No | **Yes** |
+
+### Why We Built This
+
+1. **Privacy** - Your code never leaves your machine
+2. **Free** - No subscriptions, no API costs
+3. **Offline** - Works on airplanes, in secure environments
+4. **Custom** - Use any model (CodeLlama, DeepSeek, Mistral, etc.)
+5. **Open** - Full source code, modify anything
+
+---
+
+## 🏗️ Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     CodeNative IDE                          │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────┐ │
+│  │   React + Vite  │  │   Monaco Editor │  │  Terminal   │ │
+│  │   (Frontend)    │  │   (Code View)   │  │   (PTY)     │ │
+│  └────────┬────────┘  └────────┬────────┘  └──────┬──────┘ │
+│           │                    │                   │        │
+│           ▼                    ▼                   ▼        │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │              Electron (Desktop Shell)                 │  │
+│  │         IPC Bridge for native operations              │  │
+│  └───────────────────────┬──────────────────────────────┘  │
+│                          │                                  │
+└──────────────────────────┼──────────────────────────────────┘
+                           │
+              ┌────────────┴────────────┐
+              ▼                         ▼
+       ┌───────────┐            ┌───────────┐
+       │  Backend  │            │  Ollama   │
+       │  :3001    │───────────►│  :11434   │
+       │  Express  │   HTTP     │  Local AI │
+       └───────────┘            └───────────┘
+```
+
+### Tech Stack
+
+| Layer | Technology | Why |
+|-------|------------|-----|
+| **Frontend** | React 18 + TypeScript | Modern, type-safe UI |
+| **Editor** | Monaco Editor | Same engine as VS Code |
+| **Desktop** | Electron + Vite | Native file access, terminal |
+| **State** | Zustand | Simple, no boilerplate |
+| **Backend** | Express + Socket.IO | REST + WebSocket ready |
+| **AI** | Ollama | Local LLM runtime |
+| **Terminal** | xterm.js + node-pty | Real shell integration |
+
+---
 
 ## 🚀 Features
 

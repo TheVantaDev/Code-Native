@@ -20,13 +20,23 @@ const Section: React.FC<SectionProps> = ({ title, children, defaultExpanded = tr
                 className="sidebar-section-header"
                 onClick={() => setIsExpanded(!isExpanded)}
             >
-                <span className={`sidebar-section-icon ${isExpanded ? '' : '-rotate-90'}`} style={{ transition: 'transform 0.15s ease' }}>
+                <span
+                    className="sidebar-section-icon"
+                    style={{
+                        transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',
+                    }}
+                >
                     <ChevronDown size={14} strokeWidth={2} />
                 </span>
                 <span className="truncate">{title}</span>
             </div>
             <div
-                className={`overflow-hidden transition-all duration-150 ease-out ${isExpanded ? 'max-h-[1000px] opacity-100' : 'max-h-0 opacity-0'}`}
+                style={{
+                    overflow: 'hidden',
+                    maxHeight: isExpanded ? '2000px' : '0',
+                    opacity: isExpanded ? 1 : 0,
+                    transition: 'max-height 0.2s ease-out, opacity 0.15s ease',
+                }}
             >
                 {children}
             </div>
@@ -36,10 +46,35 @@ const Section: React.FC<SectionProps> = ({ title, children, defaultExpanded = tr
 
 // Empty State Component
 const EmptyState: React.FC<{ message: string }> = ({ message }) => (
-    <div className="px-6 py-2 italic opacity-50 cursor-default select-none text-[12px] flex items-center gap-2">
-        <AlertCircle size={12} className="opacity-60" />
+    <div className="px-6 py-3 cursor-default select-none text-[12px] flex items-center gap-2"
+        style={{ color: '#565f89', fontStyle: 'italic' }}>
+        <AlertCircle size={12} style={{ opacity: 0.5 }} />
         {message}
     </div>
+);
+
+// Sidebar action button
+const SidebarAction: React.FC<{
+    icon: React.ReactNode;
+    title: string;
+    onClick?: () => void;
+}> = ({ icon, title, onClick }) => (
+    <button
+        onClick={onClick}
+        className="p-1.5 rounded transition-all cursor-pointer border-none bg-transparent"
+        style={{ color: '#565f89' }}
+        onMouseEnter={(e) => {
+            e.currentTarget.style.backgroundColor = 'rgba(122, 162, 247, 0.1)';
+            e.currentTarget.style.color = '#c0caf5';
+        }}
+        onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = 'transparent';
+            e.currentTarget.style.color = '#565f89';
+        }}
+        title={title}
+    >
+        {icon}
+    </button>
 );
 
 export const Sidebar: React.FC = () => {
@@ -51,7 +86,7 @@ export const Sidebar: React.FC = () => {
         const folderPath = await openFolderDialog();
         if (folderPath) {
             setCurrentFolder(folderPath);
-            setRefreshKey(k => k + 1); // Force FileExplorer refresh
+            setRefreshKey(k => k + 1);
         }
     };
 
@@ -67,45 +102,24 @@ export const Sidebar: React.FC = () => {
         : 'CodeNative';
 
     return (
-        <div className="sidebar">
+        <div className="sidebar animate-fade-in">
             {/* Sidebar Title Area */}
             <div className="sidebar-title group justify-between">
-                <span className="truncate" style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                <span className="truncate" style={{
+                    fontSize: '11px',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.08em',
+                    fontWeight: 600,
+                    color: '#7aa2f7',
+                }}>
                     {sidebarView === 'files' ? 'Explorer' : 'Search'}
                 </span>
                 <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button
-                        onClick={handleOpenFolder}
-                        className="p-1.5 rounded hover:bg-[rgba(255,255,255,0.1)] transition-colors cursor-pointer border-none bg-transparent text-[var(--vscode-sideBarTitle-fg)]"
-                        title="Open Folder"
-                    >
-                        <FolderOpen size={14} strokeWidth={1.5} />
-                    </button>
-                    <button
-                        className="p-1.5 rounded hover:bg-[rgba(255,255,255,0.1)] transition-colors cursor-pointer border-none bg-transparent text-[var(--vscode-sideBarTitle-fg)]"
-                        title="New File"
-                    >
-                        <Plus size={14} strokeWidth={1.5} />
-                    </button>
-                    <button
-                        onClick={handleRefresh}
-                        className="p-1.5 rounded hover:bg-[rgba(255,255,255,0.1)] transition-colors cursor-pointer border-none bg-transparent text-[var(--vscode-sideBarTitle-fg)]"
-                        title="Refresh"
-                    >
-                        <RefreshCw size={14} strokeWidth={1.5} />
-                    </button>
-                    <button
-                        className="p-1.5 rounded hover:bg-[rgba(255,255,255,0.1)] transition-colors cursor-pointer border-none bg-transparent text-[var(--vscode-sideBarTitle-fg)]"
-                        title="Collapse All"
-                    >
-                        <ChevronsDownUp size={14} strokeWidth={1.5} />
-                    </button>
-                    <button
-                        className="p-1.5 rounded hover:bg-[rgba(255,255,255,0.1)] transition-colors cursor-pointer border-none bg-transparent text-[var(--vscode-sideBarTitle-fg)]"
-                        title="More Actions"
-                    >
-                        <MoreHorizontal size={14} strokeWidth={1.5} />
-                    </button>
+                    <SidebarAction icon={<FolderOpen size={14} strokeWidth={1.5} />} title="Open Folder" onClick={handleOpenFolder} />
+                    <SidebarAction icon={<Plus size={14} strokeWidth={1.5} />} title="New File" />
+                    <SidebarAction icon={<RefreshCw size={14} strokeWidth={1.5} />} title="Refresh" onClick={handleRefresh} />
+                    <SidebarAction icon={<ChevronsDownUp size={14} strokeWidth={1.5} />} title="Collapse All" />
+                    <SidebarAction icon={<MoreHorizontal size={14} strokeWidth={1.5} />} title="More Actions" />
                 </div>
             </div>
 
@@ -140,27 +154,43 @@ const SearchPanel: React.FC = () => {
     const [searchQuery, setSearchQuery] = useState('');
 
     return (
-        <div className="p-3 text-[var(--vscode-fg)] text-sm">
+        <div className="p-3 text-sm">
             <div className="relative mb-3">
-                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 opacity-50" />
+                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: '#565f89' }} />
                 <input
                     type="text"
                     placeholder="Search"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full pl-8 pr-2 py-1.5 outline-none border border-[var(--vscode-input-border)] bg-[var(--vscode-input-bg)] text-[var(--vscode-input-fg)] rounded focus:border-[var(--vscode-focusBorder)] placeholder:text-[var(--vscode-input-placeholderFg)] text-[13px]"
+                    className="w-full pl-8 pr-2 py-2 outline-none rounded text-[13px]"
+                    style={{
+                        backgroundColor: '#1a1b26',
+                        border: '1px solid #292e42',
+                        color: '#c0caf5',
+                        transition: 'border-color 0.15s ease',
+                    }}
+                    onFocus={(e) => e.target.style.borderColor = '#7aa2f7'}
+                    onBlur={(e) => e.target.style.borderColor = '#292e42'}
                 />
             </div>
 
-            <div className="flex gap-2 mb-3">
+            <div className="relative mb-3">
                 <input
                     type="text"
                     placeholder="Replace"
-                    className="flex-1 px-2 py-1.5 outline-none border border-[var(--vscode-input-border)] bg-[var(--vscode-input-bg)] text-[var(--vscode-input-fg)] rounded focus:border-[var(--vscode-focusBorder)] placeholder:text-[var(--vscode-input-placeholderFg)] text-[13px]"
+                    className="w-full px-2 py-2 outline-none rounded text-[13px]"
+                    style={{
+                        backgroundColor: '#1a1b26',
+                        border: '1px solid #292e42',
+                        color: '#c0caf5',
+                        transition: 'border-color 0.15s ease',
+                    }}
+                    onFocus={(e) => e.target.style.borderColor = '#7aa2f7'}
+                    onBlur={(e) => e.target.style.borderColor = '#292e42'}
                 />
             </div>
 
-            <div className="text-center opacity-50 mt-6 text-[12px] leading-relaxed">
+            <div className="text-center mt-8 text-[12px] leading-relaxed" style={{ color: '#565f89' }}>
                 {searchQuery ? (
                     <p>No results found for "{searchQuery}"</p>
                 ) : (

@@ -20,9 +20,9 @@
 
 import type { OllamaModel } from '@code-native/shared';
 
-// Ollama server URL - can be configured via env variable
-// Default is localhost because most users run Ollama locally
-const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
+// Ollama server URL - using 127.0.0.1 instead of localhost
+// to avoid IPv6 issues (Node.js may try ::1 first which Ollama doesnt bind to)
+const OLLAMA_URL = process.env.OLLAMA_URL || 'http://127.0.0.1:11434';
 
 // Default model to use if none specified
 // llama3.2 is a good balance of speed vs quality for coding tasks

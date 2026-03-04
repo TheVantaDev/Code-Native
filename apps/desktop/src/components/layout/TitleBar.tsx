@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Minus, Square, X, Code2, ChevronDown } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Minus, Square, X, Code2 } from 'lucide-react';
 
 // Menu item type
 interface MenuItem {
@@ -16,22 +16,44 @@ interface MenuProps {
 
 const Menu: React.FC<MenuProps> = ({ label, items }) => {
     const [isOpen, setIsOpen] = useState(false);
+    const menuRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const handleClickOutside = (e: MouseEvent) => {
+            if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+                setIsOpen(false);
+            }
+        };
+        if (isOpen) {
+            document.addEventListener('mousedown', handleClickOutside);
+        }
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [isOpen]);
 
     return (
-        <div className="relative">
+        <div className="relative" ref={menuRef}>
             <button
                 onClick={() => setIsOpen(!isOpen)}
-                onBlur={() => setTimeout(() => setIsOpen(false), 150)}
-                className="px-2.5 py-1 text-[12px] hover:bg-[rgba(255,255,255,0.1)] rounded transition-colors cursor-pointer bg-transparent border-none text-[var(--vscode-titleBar-activeFg)]"
+                className="px-2.5 py-1 text-[12px] rounded transition-all cursor-pointer bg-transparent border-none"
+                style={{
+                    color: isOpen ? '#c0caf5' : '#a9b1d6',
+                    backgroundColor: isOpen ? 'rgba(122, 162, 247, 0.1)' : 'transparent',
+                }}
+                onMouseEnter={(e) => {
+                    if (!isOpen) (e.target as HTMLElement).style.backgroundColor = 'rgba(122, 162, 247, 0.06)';
+                }}
+                onMouseLeave={(e) => {
+                    if (!isOpen) (e.target as HTMLElement).style.backgroundColor = 'transparent';
+                }}
             >
                 {label}
             </button>
 
             {isOpen && (
-                <div className="absolute top-full left-0 mt-0.5 w-56 bg-[#252526] border border-[#454545] rounded shadow-xl z-50">
+                <div className="dropdown-menu absolute top-full left-0 mt-1 w-60 z-50 py-1">
                     {items.map((item, idx) => (
                         item.divider ? (
-                            <div key={idx} className="h-px bg-[#454545] my-1" />
+                            <div key={idx} className="h-px bg-[#292e42] my-1 mx-2" />
                         ) : (
                             <button
                                 key={idx}
@@ -39,11 +61,14 @@ const Menu: React.FC<MenuProps> = ({ label, items }) => {
                                     item.action?.();
                                     setIsOpen(false);
                                 }}
-                                className="w-full flex items-center justify-between px-3 py-1.5 text-[12px] text-[var(--vscode-fg)] hover:bg-[#094771] transition-colors cursor-pointer bg-transparent border-none text-left"
+                                className="dropdown-item w-full flex items-center justify-between px-3 py-[6px] text-[12px] cursor-pointer bg-transparent border-none text-left rounded-none"
+                                style={{ color: '#a9b1d6' }}
+                                onMouseEnter={(e) => (e.currentTarget.style.color = '#c0caf5')}
+                                onMouseLeave={(e) => (e.currentTarget.style.color = '#a9b1d6')}
                             >
                                 <span>{item.label}</span>
                                 {item.shortcut && (
-                                    <span className="text-[11px] opacity-60">{item.shortcut}</span>
+                                    <span className="text-[11px]" style={{ color: '#565f89' }}>{item.shortcut}</span>
                                 )}
                             </button>
                         )
@@ -75,24 +100,51 @@ const WindowControls: React.FC = () => {
     };
 
     return (
-        <div className="flex items-center h-full -webkit-app-region-no-drag">
+        <div className="flex items-center h-full" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
             <button
                 onClick={handleMinimize}
-                className="w-[46px] h-full flex items-center justify-center hover:bg-[rgba(255,255,255,0.1)] transition-colors cursor-pointer bg-transparent border-none text-[var(--vscode-titleBar-activeFg)]"
+                className="w-[46px] h-full flex items-center justify-center transition-colors cursor-pointer bg-transparent border-none"
+                style={{ color: '#565f89' }}
+                onMouseEnter={(e) => {
+                    (e.currentTarget.style.backgroundColor = 'rgba(122, 162, 247, 0.1)');
+                    (e.currentTarget.style.color = '#c0caf5');
+                }}
+                onMouseLeave={(e) => {
+                    (e.currentTarget.style.backgroundColor = 'transparent');
+                    (e.currentTarget.style.color = '#565f89');
+                }}
                 title="Minimize"
             >
                 <Minus size={16} />
             </button>
             <button
                 onClick={handleMaximize}
-                className="w-[46px] h-full flex items-center justify-center hover:bg-[rgba(255,255,255,0.1)] transition-colors cursor-pointer bg-transparent border-none text-[var(--vscode-titleBar-activeFg)]"
+                className="w-[46px] h-full flex items-center justify-center transition-colors cursor-pointer bg-transparent border-none"
+                style={{ color: '#565f89' }}
+                onMouseEnter={(e) => {
+                    (e.currentTarget.style.backgroundColor = 'rgba(122, 162, 247, 0.1)');
+                    (e.currentTarget.style.color = '#c0caf5');
+                }}
+                onMouseLeave={(e) => {
+                    (e.currentTarget.style.backgroundColor = 'transparent');
+                    (e.currentTarget.style.color = '#565f89');
+                }}
                 title="Maximize"
             >
                 <Square size={12} />
             </button>
             <button
                 onClick={handleClose}
-                className="w-[46px] h-full flex items-center justify-center hover:bg-[#c42b1c] transition-colors cursor-pointer bg-transparent border-none text-[var(--vscode-titleBar-activeFg)]"
+                className="w-[46px] h-full flex items-center justify-center transition-colors cursor-pointer bg-transparent border-none"
+                style={{ color: '#565f89' }}
+                onMouseEnter={(e) => {
+                    (e.currentTarget.style.backgroundColor = 'rgba(247, 118, 142, 0.15)');
+                    (e.currentTarget.style.color = '#f7768e');
+                }}
+                onMouseLeave={(e) => {
+                    (e.currentTarget.style.backgroundColor = 'transparent');
+                    (e.currentTarget.style.color = '#565f89');
+                }}
                 title="Close"
             >
                 <X size={16} />
@@ -148,14 +200,21 @@ export const TitleBar: React.FC = () => {
 
     return (
         <div
-            className="h-[30px] flex items-center justify-between bg-[#3c3c3c] border-b border-[#2b2b2b] select-none"
-            style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
+            className="h-[32px] flex items-center justify-between select-none"
+            style={{
+                WebkitAppRegion: 'drag',
+                backgroundColor: '#16171f',
+                borderBottom: '1px solid #292e42',
+            } as React.CSSProperties}
         >
             {/* Left: App Icon + Menus */}
             <div className="flex items-center h-full" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
                 {/* App Icon */}
                 <div className="w-[46px] h-full flex items-center justify-center">
-                    <Code2 size={18} className="text-[#007acc]" />
+                    <div className="w-5 h-5 rounded flex items-center justify-center"
+                        style={{ background: 'linear-gradient(135deg, #7aa2f7, #bb9af7)' }}>
+                        <Code2 size={12} className="text-white" strokeWidth={2.5} />
+                    </div>
                 </div>
 
                 {/* Menus */}
@@ -168,16 +227,15 @@ export const TitleBar: React.FC = () => {
             </div>
 
             {/* Center: Title */}
-            <div className="absolute left-1/2 -translate-x-1/2 text-[12px] text-[var(--vscode-titleBar-activeFg)] font-normal flex items-center gap-2">
-                <span className="opacity-60">CodeNative</span>
-                <span className="opacity-40">-</span>
+            <div className="absolute left-1/2 -translate-x-1/2 text-[12px] font-normal flex items-center gap-2"
+                style={{ color: '#565f89' }}>
+                <span style={{ color: '#7aa2f7', fontWeight: 500 }}>CodeNative</span>
+                <span style={{ opacity: 0.3 }}>—</span>
                 <span>Welcome</span>
             </div>
 
             {/* Right: Window Controls */}
-            <div style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
-                <WindowControls />
-            </div>
+            <WindowControls />
         </div>
     );
 };

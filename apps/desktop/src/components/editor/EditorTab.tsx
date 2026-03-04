@@ -8,16 +8,18 @@ const getFileColor = (fileName: string): string => {
     const colors: Record<string, string> = {
         ts: '#3178c6',
         tsx: '#3178c6',
-        js: '#f1e05a',
-        jsx: '#61dafb',
-        json: '#cbcb41',
-        css: '#563d7c',
-        scss: '#c6538c',
+        js: '#e5c07b',
+        jsx: '#61afef',
+        json: '#e0af68',
+        css: '#bb9af7',
+        scss: '#c586c0',
         html: '#e34c26',
-        md: '#083fa1',
-        py: '#3572A5',
+        md: '#7dcfff',
+        py: '#9ece6a',
+        go: '#7dcfff',
+        rs: '#f7768e',
     };
-    return colors[ext] || '#cccccc';
+    return colors[ext] || '#a9b1d6';
 };
 
 interface EditorTabProps {
@@ -44,18 +46,21 @@ export const EditorTab: React.FC<EditorTabProps> = ({
             className={`tab ${isActive ? 'active' : ''}`}
             title={fileName}
         >
-            {/* File Icon */}
+            {/* File Icon - colored dot per file type */}
             <span
-                className="tab-icon font-bold"
-                style={{ color: getFileColor(fileName), fontSize: '14px', marginRight: '6px' }}
-            >
-                {/* Simplified icon representation for tabs, often just a color dot or file type icon */}
-                {/* Using a pseudo-icon (letter) or just color block for simplicity/performance */}
-                {fileName.split('.').pop()?.toUpperCase().slice(0, 2) || 'TX'}
-            </span>
+                className="flex-shrink-0 w-3 h-3 rounded-sm mr-2"
+                style={{
+                    backgroundColor: getFileColor(fileName),
+                    opacity: isActive ? 0.9 : 0.5,
+                    transition: 'opacity 0.15s ease',
+                }}
+            />
 
             {/* File Name */}
-            <span className={`tab-label ${isDirty ? 'italic' : ''}`}>
+            <span className={`tab-label ${isDirty ? 'italic' : ''}`} style={{
+                fontSize: '13px',
+                fontWeight: isActive ? 500 : 400,
+            }}>
                 {fileName}
             </span>
 

@@ -1,5 +1,5 @@
-import React from 'react';
-import { Files, Search, GitBranch, Bug, Package, Settings, Bot, Sparkles } from 'lucide-react';
+import React, { useState } from 'react';
+import { Files, Search, GitBranch, Bug, Package, Settings, Sparkles } from 'lucide-react';
 import { useUIStore } from '../../stores/uiStore';
 
 interface ActivityItemProps {
@@ -9,6 +9,7 @@ interface ActivityItemProps {
     badge?: number;
     label: string;
     showDot?: 'green' | 'red' | 'yellow';
+    glowing?: boolean;
 }
 
 const ActivityItem: React.FC<ActivityItemProps> = ({
@@ -17,29 +18,44 @@ const ActivityItem: React.FC<ActivityItemProps> = ({
     onClick,
     badge,
     label,
-    showDot
+    showDot,
+    glowing
 }) => {
+    const [isHovered, setIsHovered] = useState(false);
+
     return (
-        <div
-            role="tab"
-            aria-label={label}
-            aria-selected={isActive}
-            onClick={onClick}
-            className={`activity-item ${isActive ? 'active' : ''}`}
-            title={label}
-        >
-            {icon}
-            {badge && badge > 0 && (
-                <div className="activity-badge">{badge}</div>
-            )}
-            {showDot && (
-                <div
-                    className={`absolute bottom-2 right-2 w-2 h-2 rounded-full ${showDot === 'green' ? 'bg-green-400' :
-                            showDot === 'red' ? 'bg-red-400' :
-                                'bg-yellow-400 animate-pulse'
-                        }`}
-                />
-            )}
+        <div className="tooltip-wrapper">
+            <div
+                role="tab"
+                aria-label={label}
+                aria-selected={isActive}
+                onClick={onClick}
+                onMouseEnter={() => setIsHovered(true)}
+                onMouseLeave={() => setIsHovered(false)}
+                className={`activity-item ${isActive ? 'active' : ''} ${glowing ? 'animate-glow' : ''}`}
+            >
+                {icon}
+                {badge && badge > 0 && (
+                    <div className="activity-badge">{badge}</div>
+                )}
+                {showDot && (
+                    <div
+                        className="absolute bottom-2 right-2 w-2 h-2 rounded-full"
+                        style={{
+                            backgroundColor: showDot === 'green' ? '#9ece6a' :
+                                showDot === 'red' ? '#f7768e' : '#e0af68',
+                            animation: showDot === 'yellow' ? 'pulse 2s ease-in-out infinite' : 'none',
+                            boxShadow: `0 0 6px ${showDot === 'green' ? 'rgba(158, 206, 106, 0.4)' :
+                                showDot === 'red' ? 'rgba(247, 118, 142, 0.4)' :
+                                    'rgba(224, 175, 104, 0.4)'}`
+                        }}
+                    />
+                )}
+            </div>
+            {/* Tooltip */}
+            <div className="tooltip-content">
+                {label}
+            </div>
         </div>
     );
 };
@@ -52,55 +68,63 @@ export const ActivityBar: React.FC = () => {
             {/* Top Icons */}
             <div className="flex flex-col">
                 <ActivityItem
-                    icon={<Files size={24} strokeWidth={1.5} />}
+                    icon={<Files size={22} strokeWidth={1.5} />}
                     isActive={sidebarView === 'files'}
                     onClick={() => setSidebarView('files')}
-                    label="Explorer (Ctrl+Shift+E)"
+                    label="Explorer"
                 />
                 <ActivityItem
-                    icon={<Search size={24} strokeWidth={1.5} />}
+                    icon={<Search size={22} strokeWidth={1.5} />}
                     isActive={sidebarView === 'search'}
                     onClick={() => setSidebarView('search')}
-                    label="Search (Ctrl+Shift+F)"
+                    label="Search"
                 />
                 <ActivityItem
-                    icon={<GitBranch size={24} strokeWidth={1.5} />}
+                    icon={<GitBranch size={22} strokeWidth={1.5} />}
                     isActive={false}
                     onClick={() => { }}
                     label="Source Control"
                     badge={2}
                 />
                 <ActivityItem
-                    icon={<Bug size={24} strokeWidth={1.5} />}
+                    icon={<Bug size={22} strokeWidth={1.5} />}
                     isActive={false}
                     onClick={() => { }}
                     label="Run and Debug"
                 />
                 <ActivityItem
-                    icon={<Package size={24} strokeWidth={1.5} />}
+                    icon={<Package size={22} strokeWidth={1.5} />}
                     isActive={false}
                     onClick={() => { }}
                     label="Extensions"
                 />
             </div>
 
+            {/* Divider */}
+            <div className="flex-1" />
+
             {/* Bottom Icons */}
             <div className="flex flex-col pb-2">
                 <ActivityItem
                     icon={
-                        <div className="relative">
-                            <Sparkles size={24} strokeWidth={1.5} className={isAIPanelOpen ? 'text-[#007acc]' : ''} />
-                        </div>
+                        <Sparkles
+                            size={22}
+                            strokeWidth={1.5}
+                            style={{
+                                color: isAIPanelOpen ? '#7aa2f7' : undefined,
+                            }}
+                        />
                     }
                     isActive={isAIPanelOpen}
                     onClick={toggleAIPanel}
-                    label="AI Assistant (Ctrl+Shift+I)"
+                    label="AI Assistant"
+                    glowing={isAIPanelOpen}
                 />
                 <ActivityItem
-                    icon={<Settings size={24} strokeWidth={1.5} />}
+                    icon={<Settings size={22} strokeWidth={1.5} />}
                     isActive={false}
                     onClick={() => { }}
-                    label="Manage"
+                    label="Settings"
                 />
             </div>
         </div>
