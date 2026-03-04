@@ -36,6 +36,7 @@ import { config } from 'dotenv';
 import aiRouter from './routes/ai';
 import executeRouter from './routes/execute';
 import filesRouter from './routes/files';
+import ragRouter from './routes/rag';
 
 // Import WebSocket setup
 import { setupWebSocket } from './services/websocket';
@@ -107,12 +108,14 @@ app.get('/health', (req, res) => {
  * /api/ai      - AI endpoints (chat, models, complete, review)
  * /api/execute - Code execution (run code, get output)
  * /api/files   - File operations (read, write, list)
+ * /api/rag     - RAG-enhanced AI (index, chat with context)
  * 
  * All routes are prefixed with /api/ for clarity
  */
 app.use('/api/ai', aiRouter);
 app.use('/api/execute', executeRouter);
 app.use('/api/files', filesRouter);
+app.use('/api/rag', ragRouter);
 
 // Set up WebSocket event handlers
 // This handles join room, leave room, cursor sync etc

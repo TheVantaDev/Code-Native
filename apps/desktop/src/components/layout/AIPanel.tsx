@@ -363,7 +363,8 @@ export const AIPanel: React.FC = () => {
     const { readDir } = useFileSystem();
     const {
         messages, sendMessage, isLoading, error, clearMessages,
-        connectionStatus, models, selectedModel, setSelectedModel, retryConnection
+        connectionStatus, models, selectedModel, setSelectedModel, retryConnection,
+        indexProject, isProjectIndexed,
     } = useOllama();
 
     const {
@@ -402,6 +403,12 @@ export const AIPanel: React.FC = () => {
             textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 120)}px`;
         }
     }, [input]);
+    // Auto-index project for RAG when folder is opened
+    useEffect(() => {
+        if (currentFolderPath && !isProjectIndexed) {
+            indexProject(currentFolderPath);
+        }
+    }, [currentFolderPath, isProjectIndexed, indexProject]);
 
     if (!isAIPanelOpen) return null;
 
@@ -422,9 +429,18 @@ export const AIPanel: React.FC = () => {
         if (!input.trim() || isLoading) return;
         const msg = input;
         setInput('');
+
+        // Get active file info for RAG context
+        const currentFileForRAG = currentFile ? {
+            path: currentFile.path,
+            content: currentFile.content,
+        } : undefined;
+
         await sendMessage(msg, {
             systemPrompt: CODING_ASSISTANT_SYSTEM_PROMPT,
             context: aiContext,
+            projectPath: currentFolderPath || undefined,
+            activeFile: currentFileForRAG,
         });
     };
 

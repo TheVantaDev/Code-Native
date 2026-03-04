@@ -96,6 +96,35 @@ export interface OllamaModel {
 
 export type OllamaConnectionStatus = 'connected' | 'disconnected' | 'connecting';
 
+// RAG Types
+export interface RAGChatRequest {
+    message: string;
+    model?: string;
+    projectPath?: string;
+    activeFile?: {
+        path: string;
+        content: string;
+    };
+}
+
+export interface CodeChunkInfo {
+    filePath: string;
+    relativePath: string;
+    content: string;
+    startLine: number;
+    endLine: number;
+    language: string;
+    score?: number;
+}
+
+export interface RAGIndexStatus {
+    indexed: boolean;
+    rootPath: string | null;
+    totalFiles: number;
+    totalChunks: number;
+    indexedAt: string | null;
+}
+
 // API Response Types
 export interface ApiResponse<T> {
     success: boolean;
@@ -119,4 +148,10 @@ export const WS_EVENTS = {
     TERMINAL_INPUT: 'terminal:input',
     TERMINAL_OUTPUT: 'terminal:output',
     TERMINAL_RESIZE: 'terminal:resize',
+
+    // RAG
+    RAG_INDEX_START: 'rag:index_start',
+    RAG_INDEX_COMPLETE: 'rag:index_complete',
+    RAG_INDEX_ERROR: 'rag:index_error',
 } as const;
+

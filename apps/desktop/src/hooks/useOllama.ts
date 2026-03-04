@@ -27,10 +27,14 @@ import { ChatMessage, OllamaModel, OllamaConnectionStatus } from '../types';
  * Options you can pass when sending a message
  * - systemPrompt: tells AI how to behave (e.g. "you are a coding assistant")
  * - context: project info like file tree, current file content etc
+ * - projectPath: absolute path to project root (enables RAG)
+ * - activeFile: currently open file (sent to RAG for context)
  */
 interface SendMessageOptions {
     systemPrompt?: string;
     context?: string;
+    projectPath?: string;
+    activeFile?: { path: string; content: string };
 }
 
 /**
@@ -48,6 +52,8 @@ interface UseOllamaReturn {
     setSelectedModel: (model: string) => void;                  // Change model
     fetchModels: () => Promise<void>;                           // Refresh models list
     retryConnection: () => Promise<void>;                       // Try reconnecting
+    indexProject: (path: string) => Promise<void>;              // Index project for RAG
+    isProjectIndexed: boolean;                                  // Indexing status
 }
 
 // Backend API URL - this is where our Express server runs
@@ -79,12 +85,14 @@ export function useOllama(): UseOllamaReturn {
     // Currently selected model - persisted in localStorage so user
     // doesnt have to pick it every time they open the app
     const [selectedModel, setSelectedModelState] = useState<string>(() => {
-        // Load saved preference on first render
         if (typeof window !== 'undefined') {
             return localStorage.getItem(STORAGE_KEY_MODEL) || DEFAULT_MODEL;
         }
         return DEFAULT_MODEL;
     });
+
+    // RAG indexing status
+    const [isProjectIndexed, setIsProjectIndexed] = useState(false);
 
     /**
      * Update selected model and save to localStorage
@@ -214,18 +222,32 @@ export function useOllama(): UseOllamaReturn {
                 contextString += options.context;
             }
 
-            // Step 4: Send to backend via POST
-            // Backend will stream the response back as SSE (Server-Sent Events)
-            const response = await fetch(`${BACKEND_URL}/api/ai/chat`, {
+            // Step 4: Send to backend via RAG-enhanced endpoint
+            // If projectPath is provided, use RAG chat which includes codebase context
+            // Otherwise fall back to basic AI chat
+            const useRAG = !!options?.projectPath;
+            const endpoint = useRAG ? `${BACKEND_URL}/api/rag/chat` : `${BACKEND_URL}/api/ai/chat`;
+
+            const body: Record<string, any> = {
+                message: fullMessage,
+                model: selectedModel,
+            };
+
+            if (useRAG) {
+                body.projectPath = options.projectPath;
+                if (options.activeFile) {
+                    body.activeFile = options.activeFile;
+                }
+            } else {
+                body.context = contextString || undefined;
+            }
+
+            const response = await fetch(endpoint, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({
-                    message: fullMessage,
-                    model: selectedModel,
-                    context: contextString || undefined,
-                }),
+                body: JSON.stringify(body),
             });
 
             if (!response.ok) {
@@ -319,6 +341,26 @@ export function useOllama(): UseOllamaReturn {
         setError(null);
     }, []);
 
+    /**
+     * Index a project directory for RAG context
+     */
+    const indexProjectFn = useCallback(async (path: string) => {
+        try {
+            const response = await fetch(`${BACKEND_URL}/api/rag/index`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ projectPath: path }),
+            });
+            const result = await response.json();
+            if (result.success) {
+                setIsProjectIndexed(true);
+                console.log(`[RAG] Indexed: ${result.data.totalFiles} files, ${result.data.totalChunks} chunks`);
+            }
+        } catch (err) {
+            console.warn('[RAG] Failed to index project:', err);
+        }
+    }, []);
+
     // Return everything the component needs
     return {
         messages,
@@ -332,5 +374,7 @@ export function useOllama(): UseOllamaReturn {
         setSelectedModel,
         fetchModels,
         retryConnection,
+        indexProject: indexProjectFn,
+        isProjectIndexed,
     };
 }
