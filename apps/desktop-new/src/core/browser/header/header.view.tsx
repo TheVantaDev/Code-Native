@@ -15,6 +15,7 @@ import {
 import { LayoutViewSizeConfig } from '@opensumi/ide-core-browser/lib/layout/constants';
 import { IElectronMainUIService } from '@opensumi/ide-core-common/lib/electron';
 import { IElectronHeaderService } from '@opensumi/ide-electron-basic/lib/common/header';
+import { ModelSelector } from '@/ai/browser';
 
 import styles from './header.module.less';
 
@@ -95,6 +96,9 @@ export const ElectronHeaderBar = () => {
       ref={ref}
     >
       <HeaderBarTitleComponent />
+      <div style={{ position: 'absolute', right: 0, height: '100%', display: 'flex', alignItems: 'center' }}>
+        <ModelSelector />
+      </div>
     </div>
   );
 };

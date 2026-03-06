@@ -1,16 +1,9 @@
-import { pipeline } from 'node:stream';
 import { Autowired, Injectable } from '@opensumi/di';
-import { ChatCompletionRequestMessage, ChatCompletionRequestMessageRoleEnum } from '@opensumi/ide-ai-native/lib/common';
-import { IAIBackService, IAICompletionOption, IAIReportCompletionOption, IAIBackServiceOption } from '@opensumi/ide-core-common';
-import { IAIBackServiceResponse, IChatContent } from '@opensumi/ide-core-common/lib/types/ai-native';
+import { IAIBackService, IAICompletionOption, IAIBackServiceOption } from '@opensumi/ide-core-common';
 import { CancellationToken, INodeLogger } from '@opensumi/ide-core-node';
 import { BaseAIBackService, ChatReadableStream } from '@opensumi/ide-core-node/lib/ai-native/base-back.service';
-import type { Response, fetch as FetchType } from 'undici-types';
+import type { Response } from 'undici-types';
 import { ILogServiceManager } from '@opensumi/ide-logs';
-import { AnthropicModel } from '@opensumi/ide-ai-native/lib/node/anthropic/anthropic-language-model';
-import { DeepSeekModel } from '@opensumi/ide-ai-native/lib/node/deepseek/deepseek-language-model';
-import { OpenAIModel } from '@opensumi/ide-ai-native/lib/node/openai/openai-language-model';
-import { OpenAICompatibleModel } from '@opensumi/ide-ai-native/lib/node/openai-compatible/openai-compatible-language-model';
 
 import { ChatCompletion, Completion } from './types';
 import { AIModelService } from './model.service'
@@ -25,41 +18,42 @@ export class AIBackService extends BaseAIBackService implements IAIBackService {
   @Autowired(AIModelService)
   modelService: AIModelService
 
-  @Autowired(AnthropicModel)
-  protected readonly anthropicModel: AnthropicModel;
-
-  @Autowired(OpenAIModel)
-  protected readonly openaiModel: OpenAIModel;
-
-  @Autowired(DeepSeekModel)
-  protected readonly deepseekModel: DeepSeekModel;
-
-  @Autowired(OpenAICompatibleModel)
-  protected readonly openAICompatibleModel: OpenAICompatibleModel;
-
   constructor() {
     super();
     this.logger = this.loggerManager.getLogger('ai' as any);
   }
 
   async checkOllamaStatus(): Promise<boolean> {
-    const config = this.getCompletionConfig();
-    if (!config) return false;
-
     try {
-      let url = config.baseUrl;
-      const urlObj = new URL(url);
-      const healthUrl = `${urlObj.protocol}//${urlObj.host}/api/version`;
+      // Check the custom backend's health
+      const response = await fetch('http://127.0.0.1:3001/health', {
+        method: 'GET',
+        signal: AbortSignal.timeout(5000)
+      });
+      return response.ok;
+    } catch (error) {
+      this.logger.error('Error checking backend status:', error);
+      return false;
+    }
+  }
 
-      const response = await fetch(healthUrl, {
+  async getOllamaModels(): Promise<string[]> {
+    try {
+      const response = await fetch('http://127.0.0.1:3001/api/ai/models', {
         method: 'GET',
         signal: AbortSignal.timeout(5000)
       });
 
-      return response.ok;
+      if (!response.ok) return [];
+
+      const result = await response.json() as { success: boolean, data: { name: string }[] };
+      if (result.success && Array.isArray(result.data)) {
+        return result.data.map(m => m.name);
+      }
+      return [];
     } catch (error) {
-      this.logger.error('Error checking Ollama status on node:', error);
-      return false;
+      this.logger.error('Error fetching models from backend:', error);
+      return [];
     }
   }
 
@@ -69,72 +63,43 @@ export class AIBackService extends BaseAIBackService implements IAIBackService {
       chatReadableStream.abort();
     });
 
-    const model = options.model;
-
-    if (model === 'openai') {
-      this.openaiModel.request(input, chatReadableStream, options, cancelToken);
-    } else if (model === 'deepseek') {
-      this.deepseekModel.request(input, chatReadableStream, options, cancelToken);
-    } else if (model === 'anthropic') {
-      this.anthropicModel.request(input, chatReadableStream, options, cancelToken);
-    } else {
-      // For Ollama (or other compatible models), do a direct fetch since the built-in
-      // OpenAICompatibleModel requires an API key and fails if it's not provided.
-      this.requestOllamaStream(input, chatReadableStream, options, cancelToken);
-    }
+    this.requestOllamaStream(input, chatReadableStream, options, cancelToken);
 
     return chatReadableStream;
   }
 
   private async requestOllamaStream(input: string, stream: ChatReadableStream, options: IAIBackServiceOption, cancelToken?: CancellationToken) {
     const config = this.getCompletionConfig();
-    if (!config) {
-      stream.emitError(new Error('Missing AI model configuration'));
-      return;
-    }
 
-    // Default to the OpenAI-compatible completion endpoint if baseUrl ends with /v1
-    // Otherwise assume it's a direct Ollama /api/chat endpoint
-    let url = config.baseUrl;
-    if (!url.endsWith('/')) url += '/';
-    url = new URL('chat/completions', url).toString();
-
-    // Parse the history and current input
-    const messages: any[] = [];
-    if (options.history) {
-      messages.push(...options.history.map(msg => ({
-        role: String(msg.role) === 'ai' ? 'assistant' : 'user',
-        content: msg.content,
-      })));
-    }
-
-    // Add current input
-    messages.push({
-      role: 'user',
-      content: input,
-    });
+    // Connect to the custom Express backend at :3001
+    const url = 'http://127.0.0.1:3001/api/ai/chat';
 
     try {
+      // Build the full message with history as the old frontend did
+      const history = options.history?.slice(-10) || [];
+      const conversationContext = history
+        .map(msg => `${String(msg.role) === 'ai' ? 'Assistant' : 'User'}: ${msg.content}`)
+        .join('\n\n');
+
+      const fullMessage = conversationContext
+        ? `${conversationContext}\n\nUser: ${input}`
+        : input;
+
       const controller = new AbortController();
       cancelToken?.onCancellationRequested(() => controller.abort());
 
       const response = await fetch(url, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {}),
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: config.codeModelName || 'llama3.2',
-          messages,
-          stream: true,
-          temperature: typeof config.codeTemperature === 'string' ? parseFloat(config.codeTemperature) : config.codeTemperature,
+          message: fullMessage, // Backend expects 'message'
+          model: config?.codeModelName || 'llama3.2',
         }),
         signal: controller.signal,
       });
 
       if (!response.ok) {
-        throw new Error(`Ollama request failed: ${response.status} ${await response.text()}`);
+        throw new Error(`Backend request failed: ${response.status}`);
       }
 
       const reader = response.body?.getReader();
@@ -152,16 +117,28 @@ export class AIBackService extends BaseAIBackService implements IAIBackService {
         buffer = lines.pop() || '';
 
         for (const line of lines) {
-          if (line.trim() === '' || line.trim() === 'data: [DONE]') continue;
-          if (line.startsWith('data: ')) {
+          const trimmedLine = line.trim();
+          if (trimmedLine === '' || trimmedLine === 'data: [DONE]') continue;
+
+          if (trimmedLine.startsWith('data: ')) {
             try {
-              const data = JSON.parse(line.slice(6));
-              const content = data.choices[0]?.delta?.content;
+              const data = JSON.parse(trimmedLine.slice(6));
+
+              // Backend sends { content: "...", done: boolean }
+              const content = data.content;
+
               if (content) {
                 stream.emitData({ kind: 'content', content });
               }
+
+              // Capture speed metrics if provided
+              if (data.eval_count && data.eval_duration) {
+                const speed = (data.eval_count / (data.eval_duration / 1e9)).toFixed(1);
+                const speedInfo = `\n\n<small style="opacity: 0.5;">Speed: ${speed} tokens/s</small>`;
+                stream.emitData({ kind: 'content', content: speedInfo });
+              }
             } catch (e) {
-              this.logger.error('Failed to parse stream JSON chunk:', line);
+              this.logger.error('Failed to parse stream JSON chunk:', trimmedLine);
             }
           }
         }
@@ -169,126 +146,51 @@ export class AIBackService extends BaseAIBackService implements IAIBackService {
 
       stream.end();
     } catch (error: any) {
-      this.logger.error('Ollama stream error:', error);
-      stream.emitError(error);
+      if (error.name === 'AbortError') {
+        stream.end();
+      } else {
+        this.logger.error('Backend stream error:', error);
+        stream.emitError(error);
+      }
     }
   }
 
   async requestCompletion(input: IAICompletionOption, cancelToken?: CancellationToken) {
-    const config = this.getCompletionConfig()
-    if (!config) {
-      return {
-        sessionId: input.sessionId,
-        codeModelList: [],
-      }
-    }
-
-    const response = await this.fetchModel(
-      this.getCompletionUrl(config.baseUrl, !config.codeFimTemplate),
-      {
-        stream: false,
-        model: config.codeModelName,
-        max_tokens: config.codeMaxTokens,
-        temperature: config.codeTemperature,
-        presence_penalty: config.codePresencePenalty,
-        frequency_penalty: config.codeFrequencyPenalty,
-        top_p: config.codeTopP,
-        ...(config.codeFimTemplate ? {
-          messages: [
-            ...(config.codeSystemPrompt ? [
-              {
-                role: ChatCompletionRequestMessageRoleEnum.System,
-                content: config.codeSystemPrompt,
-              },
-            ] : []),
-            {
-              role: ChatCompletionRequestMessageRoleEnum.User,
-              content: config.codeFimTemplate.replace('{prefix}', input.prompt).replace('{suffix}', input.suffix || ''),
-            }
-          ]
-        } : {
-          prompt: input.prompt,
-          suffix: input.suffix,
-        })
-      },
-      cancelToken
-    );
-
-    if (!response.ok) {
-      this.logger.error(`ai request completion failed: status: ${response.status}, body: ${await response.text()}`);
-      return {
-        sessionId: input.sessionId,
-        codeModelList: [],
-      }
-    }
+    // Inline completion would also go through the backend :3001/api/ai/complete
+    const url = 'http://127.0.0.1:3001/api/ai/complete';
 
     try {
-      const data = await response.json() as ChatCompletion | Completion
-      const content = config.codeFimTemplate ? (data as ChatCompletion)?.choices?.[0]?.message?.content : (data as Completion)?.choices?.[0]?.text;
-      if (!content) {
+      const config = this.getCompletionConfig();
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code: input.prompt,
+          language: (input as any).language || 'typescript',
+          model: config?.codeModelName || 'llama3.2'
+        }),
+      });
+
+      if (!response.ok) return { sessionId: input.sessionId, codeModelList: [] };
+
+      const result = await response.json() as { success: boolean, data: string };
+      if (result.success && result.data) {
         return {
           sessionId: input.sessionId,
-          codeModelList: [],
-        }
+          codeModelList: [{ content: result.data }],
+        };
       }
-      return {
-        sessionId: input.sessionId,
-        codeModelList: [{ content }],
-      }
-    } catch (err: any) {
-      this.logger.error(`ai request completion body parse error: ${err?.message}`);
-      throw err
+    } catch (err) {
+      this.logger.error('Completion error:', err);
     }
+
+    return {
+      sessionId: input.sessionId,
+      codeModelList: [],
+    };
   }
 
   private getCompletionConfig() {
-    const { config } = this.modelService
-    if (!config) {
-      this.logger.warn('miss config')
-      return null
-    }
-    if (!config.baseUrl) {
-      this.logger.warn('miss config baseUrl')
-      return null
-    }
-    const modelName = config.codeModelName
-    if (!modelName) {
-      this.logger.warn('miss config modelName')
-      return null
-    }
-    return config;
-  }
-
-  private async fetchModel(url: string | URL, body: Record<string, any>, cancelToken?: CancellationToken): Promise<Response> {
-    const controller = new AbortController();
-    const signal = controller.signal;
-
-    const { config } = this.modelService
-
-    cancelToken?.onCancellationRequested(() => {
-      controller.abort();
-    });
-
-    return fetch(
-      url,
-      {
-        signal,
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json;charset=UTF-8',
-          ...(config?.apiKey ? {
-            Authorization: `Bearer ${config.apiKey}`
-          } : null),
-        },
-        body: JSON.stringify(body),
-      },
-    ) as unknown as Promise<Response>;
-  }
-
-  private getCompletionUrl(baseUrl: string, supportFim = false) {
-    if (!baseUrl.endsWith('/')) {
-      baseUrl += '/'
-    }
-    return new URL(supportFim ? 'completions' : 'chat/completions', baseUrl);
+    return this.modelService.config;
   }
 }

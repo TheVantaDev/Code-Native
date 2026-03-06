@@ -1,7 +1,8 @@
-import { Injectable, Autowired } from '@opensumi/di';
+import { Injectable, Autowired, INJECTOR_TOKEN, Injector } from '@opensumi/di';
 import { INodeLogger } from '@opensumi/ide-core-node'
 import { IAIModelServiceProxy, IModelConfig } from '../common'
 import { ILogServiceManager } from '@opensumi/ide-logs';
+import { AIBackService } from './ai-back.service';
 
 @Injectable()
 export class AIModelService {
@@ -10,10 +11,18 @@ export class AIModelService {
   @Autowired(ILogServiceManager)
   private readonly loggerManager: ILogServiceManager;
 
+  @Autowired(INJECTOR_TOKEN)
+  private readonly injector: Injector;
+
   #config: IModelConfig | undefined
 
   constructor() {
     this.logger = this.loggerManager.getLogger('ai' as any);
+  }
+
+  async getOllamaModels(): Promise<string[]> {
+    const aiBackService = this.injector.get(AIBackService);
+    return aiBackService.getOllamaModels();
   }
 
   get config(): IModelConfig | undefined {
@@ -48,5 +57,9 @@ export class AIModelServiceProxy implements IAIModelServiceProxy {
 
   async setConfig(config: IModelConfig): Promise<void> {
     this.modelService.setConfig(config)
+  }
+
+  async getOllamaModels(): Promise<string[]> {
+    return this.modelService.getOllamaModels();
   }
 }
