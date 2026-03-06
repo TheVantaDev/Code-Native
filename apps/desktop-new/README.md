@@ -20,6 +20,7 @@
 - **Open Model Integration**: Our platform supports the seamless integration of various models, allowing developers to customize and extend functionality according to their needs.
 - **VS Code Extension Compatibility**: Benefit from a rich ecosystem of plugins by ensuring compatibility with VS Code extensions, enabling you to leverage existing tools and resources.
 - **Complete Solution**: Uses electron-forge to package desktop applications and supports development, building, packaging, and auto updates.
+- **Ollama Integration**: Seamless connection to local Ollama models with a convenient model selector in the header to switch between `llama3.1`, `llama3.2`, `codellama`, and more.
 
 ## Getting started
 

@@ -1,0 +1,47 @@
+.model_selector_container {
+    display: flex;
+    align-items: center;
+    margin-right: 12px;
+    -webkit-app-region: no-drag;
+}
+
+.selector_wrapper {
+    display: flex;
+    align-items: center;
+    background: rgba(0, 0, 0, 0.05);
+    padding: 2px 8px;
+    border-radius: 4px;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.model_select {
+    min-width: 120px;
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+}
+
+.refresh_icon {
+    margin-left: 8px;
+    cursor: pointer;
+    font-size: 12px;
+    color: #666;
+
+    &:hover {
+        color: #1677ff;
+    }
+}
+
+.spinning {
+    animation: sumi-spin 2s infinite linear;
+}
+
+@keyframes sumi-spin {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
+}

@@ -189,7 +189,7 @@ async function renderApp() {
         menubarLogo: logo,
       },
       capabilities: {
-        supportsMCP: true,
+        supportsMCP: false,
         supportsCustomLLMSettings: true,
       }
     },

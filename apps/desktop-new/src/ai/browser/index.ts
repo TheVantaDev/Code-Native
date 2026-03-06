@@ -9,6 +9,7 @@ import { InlineChatOperationModel } from './inline-chat-operation'
 import { AIModelContribution } from './ai-model.contribution'
 import { OllamaStatusContribution } from './ollama-status.contribution'
 import { AIModelServicePath } from '../common'
+export { ModelSelector } from './model-selector.view';
 
 export * from './constants'
 

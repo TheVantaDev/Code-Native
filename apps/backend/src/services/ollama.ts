@@ -86,7 +86,7 @@ class OllamaService {
      * @param model - Which model to use (optional, uses default)
      * @param systemPrompt - System instructions for the AI (optional)
      */
-    async *chat(message: string, model?: string, systemPrompt?: string): AsyncGenerator<{ content: string; done: boolean }> {
+    async *chat(message: string, model?: string, systemPrompt?: string): AsyncGenerator<{ content: string; done: boolean; eval_count?: number; eval_duration?: number }> {
         // Use provided system prompt or fall back to basic one
         const finalSystemPrompt = systemPrompt ||
             'You are an AI coding assistant. Help the user with their coding questions.';
@@ -127,7 +127,12 @@ class OllamaService {
                 try {
                     const json = JSON.parse(line);
                     // yield each chunk to the caller
-                    yield { content: json.response || '', done: json.done || false };
+                    yield {
+                        content: json.response || '',
+                        done: json.done || false,
+                        eval_count: json.eval_count,
+                        eval_duration: json.eval_duration
+                    };
                 } catch {
                     // Skip malformed JSON - can happen at chunk boundaries
                 }
