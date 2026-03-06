@@ -1,0 +1,42 @@
+export const localizationBundle = {
+  languageId: 'en-US',
+  languageName: 'English',
+  localizedLanguageName: 'English',
+  contents: {
+    'common.about': 'About',
+    'common.preferences': 'Preferences',
+    'common.newWindow': 'New Window',
+    'common.newWindowDesc': 'Open a new window',
+
+    'custom.quick_open': 'Quick Open',
+    'custom.command_palette': 'Command Palette',
+    'custom.terminal_panel': 'Switch to Terminal Panel',
+    'custom.search_panel': 'Switch to Search Panel',
+
+    'preference.ai.model.title': 'Completion Model',
+    'preference.ai.model.baseUrl': 'Base URL',
+    'preference.ai.model.api_key': 'API Key',
+    'preference.ai.model.code': 'Code > Completion',
+    'preference.ai.model.code.modelName': 'Code > Model Name',
+    'preference.ai.model.code.systemPrompt': 'Code > System Prompt',
+    'preference.ai.model.code.temperature': 'Code > temperature',
+    'preference.ai.model.code.maxTokens': 'Code > max_tokens',
+    'preference.ai.model.code.presencePenalty': 'Code > presence_penalty',
+    'preference.ai.model.code.frequencyPenalty': 'Code > frequency_penalty',
+    'preference.ai.model.code.topP': 'Code Completion > top_p',
+    'preference.ai.model.code.modelName.tooltip': 'The default is same as Chat Model Name',
+    'preference.ai.model.code.fimTemplate': 'Code > FIM Template',
+    'preference.ai.model.code.fimTemplate.tooltip': 'If no template is provided, the pre-cursor and post-cursor code will be sent directly to the api, and if a template is provided, the following format should be configured\n<fim_prefix>{prefix}<fim_suffix>{suffix}<fim_middle>\n{prefix} will be replaced with the pre-cursor code, and {suffix} will be replaced with the post-cursor code',
+    'preference.ai.model.temperature.description': 'What sampling temperature to use, between 0 and 2. Higher values like 0.8 will make the output more random, while lower values like 0.2 will make it more focused and deterministic.\nWe generally recommend altering this or top_p but not both.',
+    'preference.ai.model.maxTokens.description': 'The maximum number of tokens that can be generated in the chat completion.',
+    'preference.ai.model.presencePenalty.description': 'Number between -2.0 and 2.0. Positive values penalize new tokens based on whether they appear in the text so far, increasing the model\'s likelihood to talk about new topics.',
+    'preference.ai.model.frequencyPenalty.description': 'Number between -2.0 and 2.0. Positive values penalize new tokens based on their existing frequency in the text so far, decreasing the model\'s likelihood to repeat the same line verbatim.',
+    'preference.ai.model.topP.description': 'An alternative to sampling with temperature, called nucleus sampling, where the model considers the results of the tokens with top_p probability mass. So 0.1 means only the tokens comprising the top 10% probability mass are considered.\nWe generally recommend altering this or temperature but not both.',
+
+    'ai.model.noConfig': 'Please configure the AI model service for a better experience',
+    'ai.model.go': 'Go',
+
+    'autoUpdater.checkForUpdates': 'Check for Updates...',
+    'codefuse-ide.openLogDir': 'Open Log Folder',
+  },
+};
