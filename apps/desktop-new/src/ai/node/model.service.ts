@@ -6,8 +6,6 @@ import { AIBackService } from './ai-back.service';
 
 @Injectable()
 export class AIModelService {
-  private logger: INodeLogger
-
   @Autowired(ILogServiceManager)
   private readonly loggerManager: ILogServiceManager;
 
@@ -16,8 +14,13 @@ export class AIModelService {
 
   #config: IModelConfig | undefined
 
-  constructor() {
-    this.logger = this.loggerManager.getLogger('ai' as any);
+  // Lazy logger — loggerManager is injected after constructor
+  private _logger: INodeLogger | undefined;
+  private get logger(): INodeLogger {
+    if (!this._logger) {
+      this._logger = this.loggerManager.getLogger('ai' as any);
+    }
+    return this._logger;
   }
 
   async getOllamaModels(): Promise<string[]> {

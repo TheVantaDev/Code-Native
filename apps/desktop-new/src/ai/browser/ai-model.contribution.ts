@@ -20,7 +20,7 @@ const aiNativePreferenceSchema: PreferenceSchema = {
     },
     [ModelSettingId.codeModelName]: {
       type: 'string',
-      defaultValue: 'llama3.2',
+      defaultValue: '',
       description: localize('preference.ai.model.code.modelName.tooltip')
     },
     [ModelSettingId.codeSystemPrompt]: {
