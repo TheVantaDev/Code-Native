@@ -18,12 +18,16 @@ export const ModelSelector = () => {
             const modelList = await aiModelService.getOllamaModels();
             setModels(modelList);
 
-            // Update current model if it's not in the list anymore or if it's empty
+            // Get saved model from preferences
             const savedModel = preferenceService.get<string>(ModelSettingId.codeModelName);
-            if (savedModel) {
+
+            // If saved model exists in the list, use it
+            if (savedModel && modelList.includes(savedModel)) {
                 setCurrentModel(savedModel);
             } else if (modelList.length > 0) {
+                // Auto-select first available model and persist it
                 setCurrentModel(modelList[0]);
+                preferenceService.set(ModelSettingId.codeModelName, modelList[0]);
             }
         } catch (error) {
             console.error('Failed to fetch models:', error);
