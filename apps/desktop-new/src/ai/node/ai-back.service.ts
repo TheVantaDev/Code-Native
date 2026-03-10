@@ -4,7 +4,7 @@ import { CancellationToken, INodeLogger } from '@opensumi/ide-core-node';
 import { BaseAIBackService, ChatReadableStream } from '@opensumi/ide-core-node/lib/ai-native/base-back.service';
 import { ILogServiceManager } from '@opensumi/ide-logs';
 
-import { AIModelService } from './model.service'
+import { IModelConfig } from '../common'
 
 // Talk directly to Ollama — no Express backend dependency
 const OLLAMA_URL = 'http://127.0.0.1:11434';
@@ -15,9 +15,6 @@ export class AIBackService extends BaseAIBackService implements IAIBackService {
   @Autowired(ILogServiceManager)
   private readonly loggerManager: ILogServiceManager;
 
-  @Autowired(AIModelService)
-  modelService: AIModelService
-
   // Lazy logger to avoid accessing loggerManager before DI injects it
   private _logger: INodeLogger | undefined;
   private get logger(): INodeLogger {
@@ -27,11 +24,38 @@ export class AIBackService extends BaseAIBackService implements IAIBackService {
     return this._logger;
   }
 
-  // Cache discovered models so we can auto-pick if no config is set
+  // ===== Model Config (stored directly here — single source of truth) =====
+  private _config: IModelConfig | undefined;
   private _cachedFirstModel: string | undefined;
 
+  setModelConfig(config: IModelConfig): void {
+    this._config = config;
+    this.logger.log('[model config updated] model:', config.codeModelName || '(auto)');
+  }
+
+  private get modelConfig(): IModelConfig | undefined {
+    const config = this._config;
+    if (!config) return;
+    return {
+      ...config,
+      codeTemperature: this.coerceNumber(config.codeTemperature, 0, 1, 0.2),
+      codePresencePenalty: this.coerceNumber(config.codePresencePenalty, -2, 2, 1),
+      codeFrequencyPenalty: this.coerceNumber(config.codeFrequencyPenalty, -2, 2, 1),
+      codeTopP: this.coerceNumber(config.codeTopP, 0, 1, 0.95),
+    };
+  }
+
   private get modelName(): string {
-    return this.getCompletionConfig()?.codeModelName || this._cachedFirstModel || DEFAULT_MODEL;
+    const configModel = this.modelConfig?.codeModelName;
+    const resolved = configModel || this._cachedFirstModel || DEFAULT_MODEL;
+    return resolved;
+  }
+
+  private coerceNumber(value: string | number, min: number, max: number, defaultValue: number) {
+    const num = Number(value);
+    if (isNaN(num)) return defaultValue;
+    if (num < min || num > max) return defaultValue;
+    return num;
   }
 
   /**
@@ -80,18 +104,20 @@ export class AIBackService extends BaseAIBackService implements IAIBackService {
 
   /**
    * Non-streaming request — used by inline chat, rename, code edits, etc.
-   * Calls Ollama /api/generate with stream:false and returns full text.
    */
   override async request(input: string, options: IAIBackServiceOption, cancelToken?: CancellationToken) {
+    const model = this.modelName;
     try {
       const controller = new AbortController();
       cancelToken?.onCancellationRequested(() => controller.abort());
+
+      this.logger.log('[request] using model:', model);
 
       const response = await fetch(`${OLLAMA_URL}/api/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: this.modelName,
+          model,
           prompt: input,
           stream: false,
         }),
@@ -99,7 +125,7 @@ export class AIBackService extends BaseAIBackService implements IAIBackService {
       });
 
       if (!response.ok) {
-        throw new Error(`Ollama request failed: ${response.status}`);
+        throw new Error(`Ollama request failed: ${response.status} (model: ${model})`);
       }
 
       const result = await response.json() as { response?: string };
@@ -115,7 +141,6 @@ export class AIBackService extends BaseAIBackService implements IAIBackService {
 
   /**
    * Streaming request — used by chat panel, inline preview, terminal suggestions.
-   * Calls Ollama /api/generate with stream:true (NDJSON).
    */
   override async requestStream(input: string, options: IAIBackServiceOption, cancelToken?: CancellationToken) {
     const chatReadableStream = new ChatReadableStream();
@@ -129,6 +154,7 @@ export class AIBackService extends BaseAIBackService implements IAIBackService {
   }
 
   private async streamFromOllama(input: string, stream: ChatReadableStream, options: IAIBackServiceOption, cancelToken?: CancellationToken) {
+    const model = this.modelName;
     try {
       // Build conversation context from history
       const history = options.history?.slice(-10) || [];
@@ -143,12 +169,14 @@ export class AIBackService extends BaseAIBackService implements IAIBackService {
       const controller = new AbortController();
       cancelToken?.onCancellationRequested(() => controller.abort());
 
+      this.logger.log('[stream] using model:', model);
+
       // Call Ollama directly — NDJSON streaming
       const response = await fetch(`${OLLAMA_URL}/api/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: this.modelName,
+          model,
           prompt: fullPrompt,
           stream: true,
         }),
@@ -156,7 +184,7 @@ export class AIBackService extends BaseAIBackService implements IAIBackService {
       });
 
       if (!response.ok) {
-        throw new Error(`Ollama stream failed: ${response.status}`);
+        throw new Error(`Ollama stream failed: ${response.status} (model: ${model})`);
       }
 
       const reader = response.body?.getReader();
@@ -212,6 +240,7 @@ export class AIBackService extends BaseAIBackService implements IAIBackService {
    * Code completion — non-streaming, for autocomplete suggestions.
    */
   async requestCompletion(input: IAICompletionOption, cancelToken?: CancellationToken) {
+    const model = this.modelName;
     try {
       const prompt = `Complete the following code. Only output the completion, no explanation:\n\`\`\`\n${input.prompt}\n\`\`\``;
 
@@ -222,7 +251,7 @@ export class AIBackService extends BaseAIBackService implements IAIBackService {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: this.modelName,
+          model,
           prompt,
           stream: false,
         }),
@@ -246,9 +275,5 @@ export class AIBackService extends BaseAIBackService implements IAIBackService {
       sessionId: input.sessionId,
       codeModelList: [],
     };
-  }
-
-  private getCompletionConfig() {
-    return this.modelService.config;
   }
 }

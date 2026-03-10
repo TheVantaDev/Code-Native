@@ -1,68 +1,28 @@
 import { Injectable, Autowired, INJECTOR_TOKEN, Injector } from '@opensumi/di';
-import { INodeLogger } from '@opensumi/ide-core-node'
+import { AIBackSerivceToken } from '@opensumi/ide-core-common/lib/types/ai-native';
 import { IAIModelServiceProxy, IModelConfig } from '../common'
-import { ILogServiceManager } from '@opensumi/ide-logs';
 import { AIBackService } from './ai-back.service';
 
+/**
+ * RPC proxy — bridges browser → node for model config and model listing.
+ * Resolves AIBackService via the DI token to ensure we get the SAME instance
+ * that handles all AI requests (fixes the split-brain config bug).
+ */
 @Injectable()
-export class AIModelService {
-  @Autowired(ILogServiceManager)
-  private readonly loggerManager: ILogServiceManager;
-
+export class AIModelServiceProxy implements IAIModelServiceProxy {
   @Autowired(INJECTOR_TOKEN)
   private readonly injector: Injector;
 
-  #config: IModelConfig | undefined
-
-  // Lazy logger — loggerManager is injected after constructor
-  private _logger: INodeLogger | undefined;
-  private get logger(): INodeLogger {
-    if (!this._logger) {
-      this._logger = this.loggerManager.getLogger('ai' as any);
-    }
-    return this._logger;
-  }
-
-  async getOllamaModels(): Promise<string[]> {
-    const aiBackService = this.injector.get(AIBackService);
-    return aiBackService.getOllamaModels();
-  }
-
-  get config(): IModelConfig | undefined {
-    const config = this.#config
-    if (!config) return
-    return {
-      ...config,
-      codeTemperature: this.coerceNumber(config.codeTemperature, 0, 1, 0.2),
-      codePresencePenalty: this.coerceNumber(config.codePresencePenalty, -2, 2, 1),
-      codeFrequencyPenalty: this.coerceNumber(config.codeFrequencyPenalty, -2, 2, 1),
-      codeTopP: this.coerceNumber(config.codeTopP, 0, 1, 0.95),
-    }
+  private get aiBackService(): AIBackService {
+    // Resolve via the DI token (AIBackSerivceToken) to get the singleton instance
+    return this.injector.get(AIBackSerivceToken) as AIBackService;
   }
 
   async setConfig(config: IModelConfig): Promise<void> {
-    this.#config = config;
-    this.logger.log('[model config]', JSON.stringify(config));
-  }
-
-  private coerceNumber(value: string | number, min: number, max: number, defaultValue: number) {
-    const num = Number(value)
-    if (isNaN(num)) return defaultValue
-    if (num < min || num > max) return defaultValue
-    return num
-  }
-}
-
-@Injectable()
-export class AIModelServiceProxy implements IAIModelServiceProxy {
-  @Autowired(AIModelService)
-  private readonly modelService: AIModelService;
-
-  async setConfig(config: IModelConfig): Promise<void> {
-    this.modelService.setConfig(config)
+    this.aiBackService.setModelConfig(config);
   }
 
   async getOllamaModels(): Promise<string[]> {
-    return this.modelService.getOllamaModels();
+    return this.aiBackService.getOllamaModels();
   }
 }
