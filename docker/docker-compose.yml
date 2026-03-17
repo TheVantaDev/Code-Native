@@ -13,10 +13,14 @@ services:
       - OLLAMA_URL=http://ollama:11434
       - PROJECT_ROOT=/workspace
       - CORS_ORIGIN=http://localhost:5173
+      - CHROMA_URL=http://chromadb:8000
+      - CHROMA_COLLECTION=codenative_chunks
+      - EMBEDDING_MODEL=nomic-embed-text
     volumes:
       - ../workspace:/workspace
     depends_on:
       - ollama
+      - chromadb
     networks:
       - codenative
 

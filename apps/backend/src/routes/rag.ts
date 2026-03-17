@@ -1,13 +1,14 @@
 /**
  * rag.ts — RAG API Routes
- * 
+ *
  * Endpoints for project indexing and RAG-enhanced AI chat.
- * 
+ *
  * Endpoints:
- * - POST /api/rag/index  — Index a project directory
- * - POST /api/rag/chat   — RAG-enhanced chat (SSE streaming)
- * - GET  /api/rag/status — Check indexing status
- * 
+ * - POST /api/rag/index   — Index a project directory
+ * - POST /api/rag/chat    — RAG-enhanced chat (SSE streaming)
+ * - GET  /api/rag/status  — Check indexing status
+ * - POST /api/rag/reindex — Clear and re-index
+ *
  * @author CodeNative Team
  */
 
@@ -15,16 +16,17 @@ import { Router } from 'express';
 import { indexProject, isIndexed, getIndex, clearIndex } from '../services/rag/fileIndexer';
 import { buildSystemPrompt, buildBasicPrompt } from '../services/rag/promptBuilder';
 import { getIndexSummary } from '../services/rag/contextRetriever';
+import { indexChunksIntoChroma, resetVectorIndex, isVectorIndexAvailable } from '../services/rag/vectorRetriever';
 import { ollamaService } from '../services/ollama';
 
 const router = Router();
 
 /**
  * POST /api/rag/index
- * 
+ *
  * Index a project directory for RAG retrieval.
- * Should be called when user opens a folder.
- * 
+ * Also triggers async ChromaDB vector indexing when available.
+ *
  * Body: { projectPath: "/absolute/path/to/project" }
  */
 router.post('/index', async (req, res) => {
@@ -36,6 +38,12 @@ router.post('/index', async (req, res) => {
 
     try {
         const result = await indexProject(projectPath);
+
+        // Kick off vector indexing in the background (non-blocking)
+        indexChunksIntoChroma().catch(err =>
+            console.warn('Vector indexing error (non-fatal):', err),
+        );
+
         res.json({
             success: true,
             data: {
@@ -52,16 +60,22 @@ router.post('/index', async (req, res) => {
 
 /**
  * GET /api/rag/status
- * 
+ *
  * Check if a project is currently indexed
  */
 router.get('/status', (req, res) => {
-    res.json({ success: true, data: getIndexSummary() });
+    res.json({
+        success: true,
+        data: {
+            ...getIndexSummary(),
+            vectorIndexAvailable: isVectorIndexAvailable(),
+        },
+    });
 });
 
 /**
  * POST /api/rag/reindex
- * 
+ *
  * Clear and re-index the current project
  */
 router.post('/reindex', async (req, res) => {
@@ -74,7 +88,14 @@ router.post('/reindex', async (req, res) => {
 
     try {
         clearIndex();
+        resetVectorIndex();
         const result = await indexProject(path);
+
+        // Kick off vector indexing in the background
+        indexChunksIntoChroma().catch(err =>
+            console.warn('Vector reindex error (non-fatal):', err),
+        );
+
         res.json({
             success: true,
             data: {
@@ -89,18 +110,18 @@ router.post('/reindex', async (req, res) => {
 
 /**
  * POST /api/rag/chat
- * 
+ *
  * RAG-enhanced AI chat with streaming via SSE.
- * 
- * 1. Retrieves relevant code chunks from the indexed project
+ *
+ * 1. Retrieves relevant code chunks via hybrid BM25 + vector search
  * 2. Builds an enhanced system prompt with context
  * 3. Streams the LLM response back
- * 
+ *
  * Body: {
  *   message: "Add a logout button to Header.tsx",
- *   model: "llama3.2",           // optional
- *   projectPath: "/path/to/project",  // optional, triggers auto-index
- *   activeFile: {                     // optional
+ *   model: "llama3.2",               // optional
+ *   projectPath: "/path/to/project", // optional, triggers auto-index
+ *   activeFile: {                    // optional
  *     path: "src/components/Header.tsx",
  *     content: "..."
  *   }
@@ -118,14 +139,16 @@ router.post('/chat', async (req, res) => {
         if (projectPath && !isIndexed()) {
             try {
                 await indexProject(projectPath);
+                // Fire-and-forget vector indexing
+                indexChunksIntoChroma().catch(() => { /* non-fatal */ });
             } catch (e) {
                 console.warn('Auto-indexing failed, proceeding without context:', e);
             }
         }
 
-        // Build system prompt with RAG context
+        // Build system prompt with RAG context (now async due to hybrid retrieval)
         const systemPrompt = isIndexed()
-            ? buildSystemPrompt({ query: message, activeFile })
+            ? await buildSystemPrompt({ query: message, activeFile })
             : buildBasicPrompt();
 
         // Set up SSE streaming headers
@@ -144,7 +167,6 @@ router.post('/chat', async (req, res) => {
         res.end();
     } catch (error) {
         console.error('Error in RAG chat:', error);
-        // If headers already sent (streaming started), just end
         if (res.headersSent) {
             res.write(`data: ${JSON.stringify({ content: '\n\n[Error: Connection lost]', done: true })}\n\n`);
             res.end();
@@ -155,3 +177,4 @@ router.post('/chat', async (req, res) => {
 });
 
 export default router;
+

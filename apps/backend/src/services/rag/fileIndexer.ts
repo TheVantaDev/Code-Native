@@ -1,13 +1,15 @@
 /**
  * fileIndexer.ts — Project File Indexer for RAG
- * 
+ *
  * Recursively reads a project directory and chunks files into
- * searchable segments. These chunks are stored in memory and
- * used by contextRetriever.ts to find relevant code for AI queries.
- * 
- * Designed for easy swap: when vector DB is ready, just feed
- * these chunks to the embedding pipeline instead of keeping in memory.
- * 
+ * searchable segments. Chunks are stored in memory and used by
+ * contextRetriever.ts (BM25) and vectorRetriever.ts (ChromaDB).
+ *
+ * Chunking strategy:
+ * - Code files (TS/JS/Python/Java/Go/Rust/…): split at top-level
+ *   function / class / method boundaries so each chunk is a logical unit.
+ * - All other files: sliding-window with configurable overlap.
+ *
  * @author CodeNative Team
  */
 
@@ -22,8 +24,10 @@ export interface CodeChunk {
     startLine: number;
     endLine: number;
     language: string;
-    /** TF-IDF term frequencies (populated during indexing) */
+    /** Term frequencies used by BM25 retrieval */
     termFrequencies: Map<string, number>;
+    /** Total token count for BM25 document-length normalisation */
+    tokenCount: number;
 }
 
 export interface IndexedProject {
@@ -72,16 +76,29 @@ const LANGUAGE_MAP: Record<string, string> = {
     '.sh': 'bash', '.bash': 'bash', '.zsh': 'zsh',
 };
 
-// Chunk settings
+// Chunk settings for sliding-window (non-code) files
 const CHUNK_SIZE = 50;       // lines per chunk
 const CHUNK_OVERLAP = 10;    // overlap lines between chunks
 const MAX_FILE_SIZE = 100_000; // skip files larger than 100KB
 
+// Languages that support structure-aware (function/class) chunking
+const STRUCTURE_AWARE_LANGUAGES = new Set([
+    'typescript', 'javascript', 'python', 'java', 'go', 'rust',
+    'cpp', 'c', 'ruby', 'php', 'swift', 'kotlin',
+]);
+
 /**
- * Tokenize text into normalized terms for TF-IDF
+ * Tokenize text into normalized terms.
+ * Splits camelCase / PascalCase / snake_case so that identifiers
+ * like `getUserById` contribute tokens: `get`, `user`, `by`, `id`.
+ *
+ * Exported for use in contextRetriever.ts (query expansion) and
+ * vectorRetriever.ts (embedding pre-processing).
  */
-function tokenize(text: string): string[] {
-    return text
+export function tokenize(text: string): string[] {
+    // Insert spaces before uppercase letters (camelCase / PascalCase split)
+    const expanded = text.replace(/([a-z])([A-Z])/g, '$1 $2');
+    return expanded
         .toLowerCase()
         .replace(/[^a-z0-9_$]/g, ' ')
         .split(/\s+/)
@@ -89,15 +106,19 @@ function tokenize(text: string): string[] {
 }
 
 /**
- * Calculate term frequencies for a text
+ * Calculate term frequencies for a text.
+ * Returns both the frequency map and the total token count so callers
+ * can populate `CodeChunk.tokenCount` without re-tokenising.
+ *
+ * Exported for use in contextRetriever.ts and vectorRetriever.ts.
  */
-function calculateTermFrequencies(text: string): Map<string, number> {
+export function calculateTermFrequencies(text: string): { freq: Map<string, number>; tokenCount: number } {
     const tokens = tokenize(text);
     const freq = new Map<string, number>();
     for (const token of tokens) {
         freq.set(token, (freq.get(token) || 0) + 1);
     }
-    return freq;
+    return { freq, tokenCount: tokens.length };
 }
 
 /**
@@ -138,45 +159,128 @@ async function buildFileTreeString(dirPath: string, rootPath: string, prefix = '
 }
 
 /**
- * Index a single file into chunks
+ * Top-level declaration patterns used for structure-aware chunking.
+ * A line matching one of these patterns starts a new logical unit.
  */
-function chunkFile(content: string, filePath: string, relativePath: string): CodeChunk[] {
-    const lines = content.split('\n');
-    const ext = extname(filePath).toLowerCase();
-    const language = LANGUAGE_MAP[ext] || 'text';
+const STRUCTURE_PATTERNS: Record<string, RegExp> = {
+    typescript:  /^\s*(export\s+)?(async\s+)?(function|class|const|let|var|interface|type|enum|abstract\s+class)\s+\w/,
+    javascript:  /^\s*(export\s+)?(async\s+)?(function|class|const|let|var)\s+\w/,
+    python:      /^(def |class |async def )\w/,
+    java:        /^\s*(public|private|protected|static|final|abstract)(\s+\w+)*\s+(class|interface|enum|\w+\s*\()/,
+    go:          /^func\s/,
+    rust:        /^(pub\s+)?(fn |struct |impl |enum |trait )\w/,
+    cpp:         /^\w[\w:<>*&\s]+\s+\w+\s*\(/,
+    c:           /^\w[\w*\s]+\s+\w+\s*\(/,
+    ruby:        /^\s*(def |class |module )\w/,
+    php:         /^\s*(function |class |interface |trait )\w/,
+    swift:       /^\s*(func |class |struct |enum |protocol )\w/,
+    kotlin:      /^\s*(fun |class |data class |object |interface )\w/,
+};
+
+/**
+ * Structure-aware chunking: split at top-level function / class boundaries.
+ * Falls back to sliding-window for files without recognisable boundaries.
+ */
+function chunkByStructure(
+    lines: string[],
+    filePath: string,
+    relativePath: string,
+    language: string,
+): CodeChunk[] {
+    const pattern = STRUCTURE_PATTERNS[language];
     const chunks: CodeChunk[] = [];
 
-    // Small files: single chunk
+    // Find indices where a new top-level block starts
+    const boundaries: number[] = [];
+    for (let i = 0; i < lines.length; i++) {
+        if (pattern.test(lines[i])) {
+            boundaries.push(i);
+        }
+    }
+
+    // Not enough boundaries → fall back to sliding window
+    if (boundaries.length < 2) {
+        return chunkBySlidingWindow(lines, filePath, relativePath, language);
+    }
+
+    // Build one chunk per top-level block
+    for (let b = 0; b < boundaries.length; b++) {
+        const start = boundaries[b];
+        const end = b + 1 < boundaries.length ? boundaries[b + 1] : lines.length;
+        const chunkLines = lines.slice(start, end);
+
+        // If a single block is very large, sub-chunk it with sliding window
+        if (chunkLines.length > CHUNK_SIZE * 2) {
+            const subChunks = chunkBySlidingWindow(
+                chunkLines, filePath, relativePath, language,
+                start,  // offset so startLine/endLine remain absolute
+            );
+            chunks.push(...subChunks);
+        } else {
+            const content = chunkLines.join('\n');
+            const { freq, tokenCount } = calculateTermFrequencies(content);
+            chunks.push({
+                id: `${relativePath}:${start + 1}-${end}`,
+                filePath,
+                relativePath,
+                content,
+                startLine: start + 1,
+                endLine: end,
+                language,
+                termFrequencies: freq,
+                tokenCount,
+            });
+        }
+    }
+
+    return chunks;
+}
+
+/**
+ * Sliding-window chunking (used for non-code files and as fallback).
+ * @param lineOffset - absolute line offset when called for a sub-chunk
+ */
+function chunkBySlidingWindow(
+    lines: string[],
+    filePath: string,
+    relativePath: string,
+    language: string,
+    lineOffset = 0,
+): CodeChunk[] {
+    const chunks: CodeChunk[] = [];
+
     if (lines.length <= CHUNK_SIZE) {
+        const content = lines.join('\n');
+        const { freq, tokenCount } = calculateTermFrequencies(content);
         chunks.push({
-            id: `${relativePath}:0-${lines.length}`,
+            id: `${relativePath}:${lineOffset + 1}-${lineOffset + lines.length}`,
             filePath,
             relativePath,
             content,
-            startLine: 1,
-            endLine: lines.length,
+            startLine: lineOffset + 1,
+            endLine: lineOffset + lines.length,
             language,
-            termFrequencies: calculateTermFrequencies(content),
+            termFrequencies: freq,
+            tokenCount,
         });
         return chunks;
     }
 
-    // Larger files: sliding window chunks
     for (let start = 0; start < lines.length; start += CHUNK_SIZE - CHUNK_OVERLAP) {
         const end = Math.min(start + CHUNK_SIZE, lines.length);
         const chunkContent = lines.slice(start, end).join('\n');
-
+        const { freq, tokenCount } = calculateTermFrequencies(chunkContent);
         chunks.push({
-            id: `${relativePath}:${start + 1}-${end}`,
+            id: `${relativePath}:${lineOffset + start + 1}-${lineOffset + end}`,
             filePath,
             relativePath,
             content: chunkContent,
-            startLine: start + 1,
-            endLine: end,
+            startLine: lineOffset + start + 1,
+            endLine: lineOffset + end,
             language,
-            termFrequencies: calculateTermFrequencies(chunkContent),
+            termFrequencies: freq,
+            tokenCount,
         });
-
         if (end >= lines.length) break;
     }
 
@@ -184,8 +288,18 @@ function chunkFile(content: string, filePath: string, relativePath: string): Cod
 }
 
 /**
- * Recursively collect all indexable file paths
+ * Chunk a single file using structure-aware or sliding-window strategy.
  */
+function chunkFile(content: string, filePath: string, relativePath: string): CodeChunk[] {
+    const lines = content.split('\n');
+    const ext = extname(filePath).toLowerCase();
+    const language = LANGUAGE_MAP[ext] || 'text';
+
+    if (STRUCTURE_AWARE_LANGUAGES.has(language)) {
+        return chunkByStructure(lines, filePath, relativePath, language);
+    }
+    return chunkBySlidingWindow(lines, filePath, relativePath, language);
+}
 async function collectFiles(dirPath: string): Promise<string[]> {
     const files: string[] = [];
 
@@ -283,5 +397,3 @@ export function isIndexed(): boolean {
 export function clearIndex(): void {
     currentIndex = null;
 }
-
-export { calculateTermFrequencies, tokenize };
