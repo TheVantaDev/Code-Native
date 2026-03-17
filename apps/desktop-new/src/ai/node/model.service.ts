@@ -25,4 +25,8 @@ export class AIModelServiceProxy implements IAIModelServiceProxy {
   async getOllamaModels(): Promise<string[]> {
     return this.aiBackService.getOllamaModels();
   }
+
+  async setWorkspaceRoot(dir: string): Promise<void> {
+    this.aiBackService.setWorkspaceRoot(dir);
+  }
 }

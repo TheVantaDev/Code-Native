@@ -1,0 +1,67 @@
+<mxfile host="app.diagrams.net" modified="2026-03-10T11:00:00.000Z" agent="draw.io" version="24.0.0" type="device">
+  <diagram id="architecture_simple" name="Simplified Architecture">
+    <mxGraphModel dx="1200" dy="600" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1000" pageHeight="500" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="title" value="CodeNative IDE — Simplified Horizontal Architecture" style="text;html=1;fontSize=20;fontStyle=1;align=center;verticalAlign=middle;fillColor=none;strokeColor=none;fontColor=#1a1a2e;" vertex="1" parent="1">
+          <mxGeometry x="200" y="20" width="600" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- Developer -->
+        <mxCell id="user" value="🧑‍💻&lt;br&gt;&lt;b&gt;Developer&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e9;strokeColor=#43a047;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="40" y="180" width="100" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- Frontend -->
+        <mxCell id="frontend" value="&lt;b&gt;OpenSumi Frontend&lt;/b&gt;&lt;br&gt;&lt;i&gt;(React + Monaco)&lt;/i&gt;&lt;br&gt;&lt;br&gt;UI, Editor, Chat Panel" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e3f2fd;strokeColor=#1565c0;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="220" y="170" width="160" height="100" as="geometry" />
+        </mxCell>
+
+        <!-- Backend -->
+        <mxCell id="backend" value="&lt;b&gt;CodeNative Backend&lt;/b&gt;&lt;br&gt;&lt;i&gt;(Node.js)&lt;/i&gt;&lt;br&gt;&lt;br&gt;Tool Execution, RAG Pipeline" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff3e0;strokeColor=#e65100;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="460" y="170" width="180" height="100" as="geometry" />
+        </mxCell>
+
+        <!-- Ollama/LLM -->
+        <mxCell id="ollama" value="&lt;b&gt;Ollama Local LLM&lt;/b&gt;&lt;br&gt;&lt;i&gt;(Llama / DeepSeek)&lt;/i&gt;&lt;br&gt;&lt;br&gt;Inference &amp; Tool Calling" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3e5f5;strokeColor=#7b1fa2;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="720" y="90" width="180" height="100" as="geometry" />
+        </mxCell>
+
+        <!-- Vector DB -->
+        <mxCell id="vector_db" value="&lt;b&gt;Vector DB / Index&lt;/b&gt;&lt;br&gt;&lt;i&gt;(Workspace Context)&lt;/i&gt;&lt;br&gt;&lt;br&gt;Retrieval-Augmented Gen" style="shape=cylinder3;boundedLbl=1;backgroundOutline=1;size=15;rounded=1;whiteSpace=wrap;html=1;fillColor=#e0f7fa;strokeColor=#006064;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="720" y="250" width="180" height="100" as="geometry" />
+        </mxCell>
+
+        <!-- Arrows -->
+        <mxCell id="arrow1" value="Interacts" style="endArrow=classic;html=1;strokeWidth=2;" edge="1" parent="1" source="user" target="frontend">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="arrow2" value="IPC / RPC" style="endArrow=classic;startArrow=classic;html=1;strokeWidth=2;" edge="1" parent="1" source="frontend" target="backend">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="arrow3" value="Prompt + Context" style="endArrow=classic;startArrow=classic;html=1;strokeWidth=2;" edge="1" parent="1" source="backend" target="ollama">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="680" y="220" />
+              <mxPoint x="680" y="140" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="arrow4" value="Queries Context" style="endArrow=classic;startArrow=classic;html=1;strokeWidth=2;dashed=1;" edge="1" parent="1" source="backend" target="vector_db">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="680" y="220" />
+              <mxPoint x="680" y="300" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

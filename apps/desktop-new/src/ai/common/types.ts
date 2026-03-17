@@ -5,6 +5,7 @@ export const IAIModelServiceProxy = Symbol('IAIModelServiceProxy')
 export interface IAIModelServiceProxy {
   setConfig(values: Record<string, any>): Promise<void>
   getOllamaModels(): Promise<string[]>
+  setWorkspaceRoot(dir: string): Promise<void>
 }
 
 export const ModelSettingId = {

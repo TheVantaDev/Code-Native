@@ -6,14 +6,13 @@ import { AIModelServicePath, IAIModelServiceProxy, ModelSettingId } from '../com
 import styles from './model-selector.module.less';
 
 const POPULAR_MODELS = [
-    'llama3.1',
-    'llama3.2',
-    'deepseek-r1:8b',
-    'deepseek-r1:14b',
     'qwen2.5-coder:7b',
-    'mistral',
+    'qwen2.5-coder:3b',
+    'qwen3-coder:30b',
+    'deepseek-coder-v2:16b',
+    'deepseek-r1:8b',
+    'llama3.1',
     'codellama',
-    'phi3',
 ];
 
 export const ModelSelector = () => {
