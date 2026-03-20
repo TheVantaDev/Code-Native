@@ -8,9 +8,14 @@ import * as path from 'path';
 
 import { IModelConfig } from '../common'
 
-// Talk directly to Ollama — no Express backend dependency
+// Ollama API (direct, used for tool-calling agent loop)
 const OLLAMA_URL = 'http://127.0.0.1:11434';
 const DEFAULT_MODEL = 'qwen2.5-coder:7b';
+
+// CodeNative backend server (enhanced RAG, model listing, completions)
+const BACKEND_URL = process.env.CODENATIVE_BACKEND_URL || 'http://localhost:3001';
+const BACKEND_HEALTH_TIMEOUT_MS = 3000;
+const OLLAMA_HEALTH_TIMEOUT_MS = 5000;
 
 // ======================== HELPER UTILITIES ========================
 
@@ -499,6 +504,10 @@ export class AIBackService extends BaseAIBackService implements IAIBackService {
   private _workspaceRoot: string = '';
   private _indexBuilt = false;
 
+  // ===== Backend Connection State =====
+  private _backendAvailable = false;
+  private _backendIndexed = false;
+
   setModelConfig(config: IModelConfig): void {
     this._config = config;
     this.logger.log('[model config updated] model:', config.codeModelName || '(auto)');
@@ -532,6 +541,9 @@ export class AIBackService extends BaseAIBackService implements IAIBackService {
       // Log first few files from the tree so we can verify
       const firstFiles = this._workspaceIndex.fileTree.split('\n').slice(0, 10).join('\n');
       console.log(`[CodeNative AI] File tree preview:\n${firstFiles}`);
+
+      // Also index on the backend for enhanced BM25 + vector retrieval (non-blocking)
+      this.indexOnBackend(cleanDir);
     }, 1000);
   }
 
@@ -561,9 +573,92 @@ export class AIBackService extends BaseAIBackService implements IAIBackService {
 
   // ======================== HEALTH & MODELS ========================
 
-  async checkOllamaStatus(): Promise<boolean> {
+  /** Index the current project on the backend for enhanced BM25 + vector retrieval */
+  private async indexOnBackend(projectPath: string): Promise<void> {
     try {
-      const response = await fetch(OLLAMA_URL, { method: 'GET', signal: AbortSignal.timeout(5000) });
+      const res = await fetch(`${BACKEND_URL}/api/rag/index`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectPath }),
+      });
+      if (res.ok) {
+        const result = await res.json() as { success: boolean; data: { totalFiles: number; totalChunks: number } };
+        if (result.success) {
+          this._backendIndexed = true;
+          console.log(`[CodeNative AI] Backend indexed: ${result.data.totalFiles} files, ${result.data.totalChunks} chunks`);
+        }
+      }
+    } catch (err: any) {
+      console.warn('[CodeNative AI] Backend indexing failed (non-fatal):', err.message);
+    }
+  }
+
+  /**
+   * Stream a chat response from the backend's RAG-enhanced SSE endpoint.
+   * The backend automatically retrieves the most relevant chunks (BM25 + ChromaDB vector)
+   * and builds an enhanced system prompt before calling Ollama.
+   */
+  private async doStreamingChatViaBackend(
+    query: string,
+    stream: ChatReadableStream,
+    controller: AbortController,
+  ): Promise<void> {
+    const response = await fetch(`${BACKEND_URL}/api/rag/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: query,
+        model: this.modelName,
+        projectPath: this._workspaceRoot || undefined,
+      }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(`Backend RAG chat failed: ${response.status}`);
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error('No response body from backend');
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('data: ')) continue;
+        const data = trimmed.slice(6);
+        if (data === '[DONE]') return;
+        try {
+          const json = JSON.parse(data) as { content?: string; done?: boolean };
+          if (json.content) {
+            stream.emitData({ kind: 'content', content: json.content });
+          }
+        } catch { /* skip malformed SSE lines */ }
+      }
+    }
+  }
+
+  async checkOllamaStatus(): Promise<boolean> {
+    // Check backend health (non-blocking, updates _backendAvailable flag)
+    fetch(`${BACKEND_URL}/health`, { method: 'GET', signal: AbortSignal.timeout(BACKEND_HEALTH_TIMEOUT_MS) })
+      .then(res => {
+        this._backendAvailable = res.ok;
+        if (res.ok) console.log('[CodeNative AI] Backend connected:', BACKEND_URL);
+      })
+      .catch(() => { this._backendAvailable = false; });
+
+    // Check Ollama directly (needed for tool-calling agent loop)
+    try {
+      const response = await fetch(OLLAMA_URL, { method: 'GET', signal: AbortSignal.timeout(OLLAMA_HEALTH_TIMEOUT_MS) });
       return response.ok;
     } catch {
       return false;
@@ -571,6 +666,25 @@ export class AIBackService extends BaseAIBackService implements IAIBackService {
   }
 
   async getOllamaModels(): Promise<string[]> {
+    // Try backend first — it lists models from Ollama and may have extra metadata
+    if (this._backendAvailable) {
+      try {
+        const response = await fetch(`${BACKEND_URL}/api/ai/models`, {
+          method: 'GET',
+          signal: AbortSignal.timeout(5000),
+        });
+        if (response.ok) {
+          const result = await response.json() as { success: boolean; data: { name: string }[] };
+          if (result.success && Array.isArray(result.data) && result.data.length > 0) {
+            const names = result.data.map((m: { name: string }) => m.name);
+            if (!this._cachedFirstModel) this._cachedFirstModel = names[0];
+            return names;
+          }
+        }
+      } catch { /* fall through to Ollama direct */ }
+    }
+
+    // Fallback: call Ollama directly
     try {
       const response = await fetch(`${OLLAMA_URL}/api/tags`, { method: 'GET', signal: AbortSignal.timeout(5000) });
       if (!response.ok) return [];
@@ -640,6 +754,24 @@ export class AIBackService extends BaseAIBackService implements IAIBackService {
     clearToolCallHistory();
 
     try {
+      const controller = new AbortController();
+      cancelToken?.onCancellationRequested(() => controller.abort());
+
+      // ===== BACKEND RAG PATH =====
+      // For no-tool (inline ops, explain, optimize, etc.) use backend's enhanced
+      // BM25 + vector hybrid retrieval instead of local TF-IDF.
+      if (isNoTool && this._backendAvailable) {
+        console.log('[CodeNative AI] Routing to backend RAG chat (enhanced retrieval)');
+        try {
+          await this.doStreamingChatViaBackend(input, stream, controller);
+          stream.end();
+          return;
+        } catch (backendErr: any) {
+          console.warn('[CodeNative AI] Backend chat failed, falling back to Ollama:', backendErr.message);
+          // Fall through to local Ollama path
+        }
+      }
+
       const messages: Array<{ role: string; content: string }> = [];
 
       // ===== SYSTEM PROMPT =====
@@ -1075,10 +1207,29 @@ CRITICAL RULES FOR TOOL USAGE:
   async requestCompletion(input: IAICompletionOption, cancelToken?: CancellationToken) {
     const model = this.modelName;
     try {
-      const prompt = `Complete the following code. Only output the completion, no explanation:\n\`\`\`\n${input.prompt}\n\`\`\``;
-
       const controller = new AbortController();
       cancelToken?.onCancellationRequested(() => controller.abort());
+
+      // Try the backend's dedicated completion endpoint first
+      if (this._backendAvailable) {
+        try {
+          const response = await fetch(`${BACKEND_URL}/api/ai/complete`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ code: input.prompt, language: (input as any).language }),
+            signal: controller.signal,
+          });
+          if (response.ok) {
+            const result = await response.json() as { success: boolean; data: string };
+            if (result.success && result.data) {
+              return { sessionId: input.sessionId, codeModelList: [{ content: result.data }] };
+            }
+          }
+        } catch { /* fall through to Ollama */ }
+      }
+
+      // Fallback: call Ollama directly
+      const prompt = `Complete the following code. Only output the completion, no explanation:\n\`\`\`\n${input.prompt}\n\`\`\``;
 
       const response = await fetch(`${OLLAMA_URL}/api/chat`, {
         method: 'POST',

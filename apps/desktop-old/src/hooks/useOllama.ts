@@ -349,10 +349,12 @@ export function useOllama(): UseOllamaReturn {
     /**
      * Poll /api/rag/status until vectorIndexAvailable is true or timeout
      */
+    const MAX_POLL_ATTEMPTS = 20;
+    const POLL_INTERVAL_MS = 2000;
+
     const pollVectorStatus = useCallback(async () => {
-        const maxAttempts = 20;
-        for (let i = 0; i < maxAttempts; i++) {
-            await new Promise(resolve => setTimeout(resolve, 2000));
+        for (let i = 0; i < MAX_POLL_ATTEMPTS; i++) {
+            await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
             try {
                 const res = await fetch(`${BACKEND_URL}/api/rag/status`);
                 const json = await res.json();
@@ -364,6 +366,8 @@ export function useOllama(): UseOllamaReturn {
                 // non-fatal — keep polling
             }
         }
+        // Timed out without confirming vector index — explicitly reset flag
+        setIsVectorIndexed(false);
     }, []);
 
     /**

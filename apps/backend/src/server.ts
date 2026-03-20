@@ -52,6 +52,20 @@ const app = express();
 const httpServer = createServer(app);
 
 /**
+ * CORS Configuration
+ * 
+ * Supports comma-separated origins in CORS_ORIGIN env var so both
+ * desktop-old (Vite :5173) and desktop-new web variant (:8000) can connect.
+ * 
+ * Electron node-process calls are not subject to CORS, but browser-renderer
+ * calls (e.g. model pulls) need the correct origin allowed.
+ */
+const allowedOrigins = (process.env.CORS_ORIGIN || 'http://localhost:5173,http://localhost:8000')
+    .split(',')
+    .map(o => o.trim())
+    .filter(Boolean);
+
+/**
  * Socket.IO Setup
  * 
  * We use Socket.IO for real-time features like:
@@ -59,27 +73,29 @@ const httpServer = createServer(app);
  * - Real-time notifications
  * - Cursor position sharing
  * 
- * CORS is configured to allow frontend origin.
- * In production youd want to lock this down more.
+ * CORS is configured to allow all known frontend origins.
  */
 const io = new SocketIOServer(httpServer, {
     cors: {
-        origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+        origin: allowedOrigins,
         methods: ['GET', 'POST'],
     },
 });
 
 /**
- * CORS Configuration
+ * Express CORS Middleware
  * 
- * CORS = Cross-Origin Resource Sharing
- * Without this, browser would block frontend from calling our API
- * because theyre on different ports (5173 vs 3001).
- * 
- * credentials: true allows sending cookies/auth headers
+ * Allows browser-side requests from any configured origin.
+ * Requests with no origin (Electron node process, curl, etc.) are always allowed.
+ * credentials: true allows cookies / auth headers.
  */
 app.use(cors({
-    origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+    origin: (origin, callback) => {
+        // Allow requests with no origin (Electron node process, server-to-server, curl)
+        if (!origin) return callback(null, true);
+        if (allowedOrigins.includes(origin)) return callback(null, true);
+        callback(new Error(`CORS: origin ${origin} not allowed. Allowed origins: ${allowedOrigins.join(', ')}`));
+    },
     credentials: true,
 }));
 
