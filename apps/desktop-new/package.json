@@ -135,6 +135,7 @@
     "@opensumi/tree-sitter-wasm": "1.1.2",
     "@vscode/spdlog": "^0.15.0",
     "buffer": "^6.0.3",
+    "chromadb": "3.3.3",
     "electron-updater": "6.3.9",
     "js-yaml": "^4.1.0",
     "koa": "^2.15.3",

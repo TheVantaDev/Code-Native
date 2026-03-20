@@ -7,14 +7,12 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 import { IModelConfig } from '../common'
+import { indexProject, getIndex } from './rag/fileIndexer';
+import { hybridRetrieve, indexChunksIntoChroma, resetVectorIndex } from './rag/vectorRetriever';
 
-// Ollama API (direct, used for tool-calling agent loop)
+// Ollama API
 const OLLAMA_URL = 'http://127.0.0.1:11434';
 const DEFAULT_MODEL = 'qwen2.5-coder:7b';
-
-// CodeNative backend server (enhanced RAG, model listing, completions)
-const BACKEND_URL = process.env.CODENATIVE_BACKEND_URL || 'http://localhost:3001';
-const BACKEND_HEALTH_TIMEOUT_MS = 3000;
 const OLLAMA_HEALTH_TIMEOUT_MS = 5000;
 
 // ======================== HELPER UTILITIES ========================
@@ -279,187 +277,6 @@ function executeToolCall(rawName: string, args: Record<string, any>): string {
   }
 }
 
-// ======================== RAG: TF-IDF WORKSPACE INDEXER ========================
-
-interface CodeChunk {
-  id: string;
-  filePath: string;
-  relativePath: string;
-  content: string;
-  startLine: number;
-  endLine: number;
-  termFrequencies: Map<string, number>;
-}
-
-interface WorkspaceIndex {
-  chunks: CodeChunk[];
-  fileTree: string;
-  totalFiles: number;
-}
-
-const CHUNK_SIZE = 50;       // lines per chunk
-const CHUNK_OVERLAP = 10;    // overlap between chunks
-
-/** Tokenize text into normalized terms for TF-IDF */
-function tokenize(text: string): string[] {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9_$]/g, ' ')
-    .split(/\s+/)
-    .filter(t => t.length > 1 && t.length < 50);
-}
-
-/** Calculate term frequencies for a text */
-function calcTF(text: string): Map<string, number> {
-  const tokens = tokenize(text);
-  const freq = new Map<string, number>();
-  for (const token of tokens) {
-    freq.set(token, (freq.get(token) || 0) + 1);
-  }
-  return freq;
-}
-
-/** Calculate IDF for all terms in the corpus */
-function calcIDF(chunks: CodeChunk[]): Map<string, number> {
-  const n = chunks.length;
-  const docFreq = new Map<string, number>();
-  for (const chunk of chunks) {
-    const seen = new Set(chunk.termFrequencies.keys());
-    for (const term of seen) {
-      docFreq.set(term, (docFreq.get(term) || 0) + 1);
-    }
-  }
-  const idf = new Map<string, number>();
-  for (const [term, df] of docFreq) {
-    idf.set(term, Math.log(n / df));
-  }
-  return idf;
-}
-
-/** Build an in-memory TF-IDF index of all source files in a workspace */
-function buildWorkspaceIndex(rootDir: string, maxDepth = 6): WorkspaceIndex {
-  const IGNORE_DIRS = new Set([
-    'node_modules', '.git', 'out', 'build', 'dist', 'target',
-    '.cache', '.next', '__pycache__', '.vscode', '.idea', '.gradle',
-  ]);
-  const CODE_EXTENSIONS = new Set([
-    '.java', '.ts', '.tsx', '.js', '.jsx', '.py', '.c', '.cpp', '.h',
-    '.cs', '.go', '.rs', '.rb', '.php', '.swift', '.kt', '.scala',
-    '.html', '.css', '.scss', '.less', '.json', '.xml', '.yaml', '.yml',
-    '.md', '.txt', '.sql', '.sh', '.bat', '.ps1', '.dockerfile',
-    '.vue', '.svelte', '.prisma', '.graphql', '.toml',
-  ]);
-
-  const chunks: CodeChunk[] = [];
-  const treeParts: string[] = [];
-  let totalFiles = 0;
-
-  function walk(dir: string, depth: number, prefix: string) {
-    if (depth > maxDepth) return;
-    try {
-      const items = fs.readdirSync(dir, { withFileTypes: true })
-        .sort((a, b) => {
-          if (a.isDirectory() && !b.isDirectory()) return -1;
-          if (!a.isDirectory() && b.isDirectory()) return 1;
-          return a.name.localeCompare(b.name);
-        });
-
-      for (let i = 0; i < items.length; i++) {
-        const item = items[i];
-        const isLast = i === items.length - 1;
-        const connector = isLast ? '└── ' : '├── ';
-        const childPrefix = isLast ? '    ' : '│   ';
-
-        if (item.isDirectory()) {
-          if (IGNORE_DIRS.has(item.name)) continue;
-          treeParts.push(`${prefix}${connector}${item.name}/`);
-          walk(path.join(dir, item.name), depth + 1, prefix + childPrefix);
-        } else if (item.isFile()) {
-          const ext = path.extname(item.name).toLowerCase();
-          treeParts.push(`${prefix}${connector}${item.name}`);
-
-          if (!CODE_EXTENSIONS.has(ext)) continue;
-
-          const fullPath = path.join(dir, item.name);
-          try {
-            const stat = fs.statSync(fullPath);
-            if (stat.size > 100_000) continue;
-
-            const content = fs.readFileSync(fullPath, 'utf-8');
-            const lines = content.split('\n');
-            const relativePath = path.relative(rootDir, fullPath).replace(/\\/g, '/');
-            totalFiles++;
-
-            // Chunk the file with sliding window
-            if (lines.length <= CHUNK_SIZE) {
-              chunks.push({
-                id: `${relativePath}:1-${lines.length}`,
-                filePath: fullPath,
-                relativePath,
-                content,
-                startLine: 1,
-                endLine: lines.length,
-                termFrequencies: calcTF(content),
-              });
-            } else {
-              for (let start = 0; start < lines.length; start += CHUNK_SIZE - CHUNK_OVERLAP) {
-                const end = Math.min(start + CHUNK_SIZE, lines.length);
-                const chunkContent = lines.slice(start, end).join('\n');
-                chunks.push({
-                  id: `${relativePath}:${start + 1}-${end}`,
-                  filePath: fullPath,
-                  relativePath,
-                  content: chunkContent,
-                  startLine: start + 1,
-                  endLine: end,
-                  termFrequencies: calcTF(chunkContent),
-                });
-                if (end >= lines.length) break;
-              }
-            }
-          } catch { /* skip unreadable files */ }
-        }
-      }
-    } catch { /* skip unreadable dirs */ }
-  }
-
-  walk(rootDir, 0, '');
-  return { chunks, fileTree: treeParts.join('\n'), totalFiles };
-}
-
-/** TF-IDF retrieval: find top-K relevant chunks for a query */
-function retrieveChunks(index: WorkspaceIndex, query: string, topK = 5): CodeChunk[] {
-  if (index.chunks.length === 0) return [];
-
-  const queryTF = calcTF(query);
-  const idf = calcIDF(index.chunks);
-
-  const scored = index.chunks.map(chunk => {
-    let score = 0;
-    for (const [term, qFreq] of queryTF) {
-      const cFreq = chunk.termFrequencies.get(term) || 0;
-      const termIdf = idf.get(term) || 0;
-      score += qFreq * cFreq * termIdf * termIdf;
-    }
-
-    // Filename boost
-    const queryLower = query.toLowerCase();
-    const fileName = chunk.relativePath.split('/').pop()?.toLowerCase() || '';
-    if (queryLower.includes(fileName)) score += 10;
-    for (const part of chunk.relativePath.toLowerCase().split('/')) {
-      if (part.length > 2 && queryLower.includes(part)) score += 3;
-    }
-
-    return { chunk, score };
-  });
-
-  return scored
-    .filter(s => s.score > 0)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, topK)
-    .map(s => s.chunk);
-}
-
 /** Search workspace for a specific bare filename (DFS) */
 function findFileInWorkspace(rootDir: string, fileName: string, maxDepth = 5, depth = 0): string | null {
   if (depth > maxDepth) return null;
@@ -499,14 +316,10 @@ export class AIBackService extends BaseAIBackService implements IAIBackService {
   private _config: IModelConfig | undefined;
   private _cachedFirstModel: string | undefined;
 
-  // ===== RAG: In-Memory Workspace Index =====
-  private _workspaceIndex: WorkspaceIndex = { chunks: [], fileTree: '', totalFiles: 0 };
+  // ===== RAG: BM25 + Vector Index =====
+  // Index is stored in the fileIndexer module-level singleton (getIndex())
   private _workspaceRoot: string = '';
   private _indexBuilt = false;
-
-  // ===== Backend Connection State =====
-  private _backendAvailable = false;
-  private _backendIndexed = false;
 
   setModelConfig(config: IModelConfig): void {
     this._config = config;
@@ -532,18 +345,20 @@ export class AIBackService extends BaseAIBackService implements IAIBackService {
     this._indexBuilt = false;
     console.log(`[CodeNative AI] Workspace root set to: ${cleanDir}`);
 
-    // Build index asynchronously
-    setTimeout(() => {
-      console.log(`[CodeNative AI] Building workspace index (TF-IDF)...`);
-      this._workspaceIndex = buildWorkspaceIndex(cleanDir);
+    // Build BM25 index asynchronously
+    setTimeout(async () => {
+      console.log(`[CodeNative AI] Building workspace index (BM25)...`);
+      resetVectorIndex();
+      const project = await indexProject(cleanDir);
       this._indexBuilt = true;
-      console.log(`[CodeNative AI] Workspace index built: ${this._workspaceIndex.totalFiles} files, ${this._workspaceIndex.chunks.length} chunks`);
-      // Log first few files from the tree so we can verify
-      const firstFiles = this._workspaceIndex.fileTree.split('\n').slice(0, 10).join('\n');
+      console.log(`[CodeNative AI] Workspace index built: ${project.totalFiles} files, ${project.totalChunks} chunks`);
+      const firstFiles = project.fileTree.split('\n').slice(0, 10).join('\n');
       console.log(`[CodeNative AI] File tree preview:\n${firstFiles}`);
 
-      // Also index on the backend for enhanced BM25 + vector retrieval (non-blocking)
-      this.indexOnBackend(cleanDir);
+      // Build vector index in ChromaDB (optional, falls back to BM25-only if unavailable)
+      indexChunksIntoChroma().catch(err =>
+        console.warn('[CodeNative AI] Vector indexing failed (non-fatal):', err?.message ?? String(err)),
+      );
     }, 1000);
   }
 
@@ -573,90 +388,8 @@ export class AIBackService extends BaseAIBackService implements IAIBackService {
 
   // ======================== HEALTH & MODELS ========================
 
-  /** Index the current project on the backend for enhanced BM25 + vector retrieval */
-  private async indexOnBackend(projectPath: string): Promise<void> {
-    try {
-      const res = await fetch(`${BACKEND_URL}/api/rag/index`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectPath }),
-      });
-      if (res.ok) {
-        const result = await res.json() as { success: boolean; data: { totalFiles: number; totalChunks: number } };
-        if (result.success) {
-          this._backendIndexed = true;
-          console.log(`[CodeNative AI] Backend indexed: ${result.data.totalFiles} files, ${result.data.totalChunks} chunks`);
-        }
-      }
-    } catch (err: any) {
-      console.warn('[CodeNative AI] Backend indexing failed (non-fatal):', err.message);
-    }
-  }
-
-  /**
-   * Stream a chat response from the backend's RAG-enhanced SSE endpoint.
-   * The backend automatically retrieves the most relevant chunks (BM25 + ChromaDB vector)
-   * and builds an enhanced system prompt before calling Ollama.
-   */
-  private async doStreamingChatViaBackend(
-    query: string,
-    stream: ChatReadableStream,
-    controller: AbortController,
-  ): Promise<void> {
-    const response = await fetch(`${BACKEND_URL}/api/rag/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        message: query,
-        model: this.modelName,
-        projectPath: this._workspaceRoot || undefined,
-      }),
-      signal: controller.signal,
-    });
-
-    if (!response.ok) {
-      throw new Error(`Backend RAG chat failed: ${response.status}`);
-    }
-
-    const reader = response.body?.getReader();
-    if (!reader) throw new Error('No response body from backend');
-
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed.startsWith('data: ')) continue;
-        const data = trimmed.slice(6);
-        if (data === '[DONE]') return;
-        try {
-          const json = JSON.parse(data) as { content?: string; done?: boolean };
-          if (json.content) {
-            stream.emitData({ kind: 'content', content: json.content });
-          }
-        } catch { /* skip malformed SSE lines */ }
-      }
-    }
-  }
 
   async checkOllamaStatus(): Promise<boolean> {
-    // Check backend health (non-blocking, updates _backendAvailable flag)
-    fetch(`${BACKEND_URL}/health`, { method: 'GET', signal: AbortSignal.timeout(BACKEND_HEALTH_TIMEOUT_MS) })
-      .then(res => {
-        this._backendAvailable = res.ok;
-        if (res.ok) console.log('[CodeNative AI] Backend connected:', BACKEND_URL);
-      })
-      .catch(() => { this._backendAvailable = false; });
-
-    // Check Ollama directly (needed for tool-calling agent loop)
     try {
       const response = await fetch(OLLAMA_URL, { method: 'GET', signal: AbortSignal.timeout(OLLAMA_HEALTH_TIMEOUT_MS) });
       return response.ok;
@@ -666,25 +399,6 @@ export class AIBackService extends BaseAIBackService implements IAIBackService {
   }
 
   async getOllamaModels(): Promise<string[]> {
-    // Try backend first — it lists models from Ollama and may have extra metadata
-    if (this._backendAvailable) {
-      try {
-        const response = await fetch(`${BACKEND_URL}/api/ai/models`, {
-          method: 'GET',
-          signal: AbortSignal.timeout(5000),
-        });
-        if (response.ok) {
-          const result = await response.json() as { success: boolean; data: { name: string }[] };
-          if (result.success && Array.isArray(result.data) && result.data.length > 0) {
-            const names = result.data.map((m: { name: string }) => m.name);
-            if (!this._cachedFirstModel) this._cachedFirstModel = names[0];
-            return names;
-          }
-        }
-      } catch { /* fall through to Ollama direct */ }
-    }
-
-    // Fallback: call Ollama directly
     try {
       const response = await fetch(`${OLLAMA_URL}/api/tags`, { method: 'GET', signal: AbortSignal.timeout(5000) });
       if (!response.ok) return [];
@@ -757,27 +471,13 @@ export class AIBackService extends BaseAIBackService implements IAIBackService {
       const controller = new AbortController();
       cancelToken?.onCancellationRequested(() => controller.abort());
 
-      // ===== BACKEND RAG PATH =====
-      // For no-tool (inline ops, explain, optimize, etc.) use backend's enhanced
-      // BM25 + vector hybrid retrieval instead of local TF-IDF.
-      if (isNoTool && this._backendAvailable) {
-        console.log('[CodeNative AI] Routing to backend RAG chat (enhanced retrieval)');
-        try {
-          await this.doStreamingChatViaBackend(input, stream, controller);
-          stream.end();
-          return;
-        } catch (backendErr: any) {
-          console.warn('[CodeNative AI] Backend chat failed, falling back to Ollama:', backendErr.message);
-          // Fall through to local Ollama path
-        }
-      }
-
       const messages: Array<{ role: string; content: string }> = [];
 
       // ===== SYSTEM PROMPT =====
       const workspaceInfo = this._workspaceRoot ? `\nWorkspace: ${this._workspaceRoot}` : '';
-      const fileTreeSnippet = this._workspaceIndex.fileTree
-        ? `\n\nProject structure:\n${this._workspaceIndex.fileTree.split('\n').slice(0, 80).join('\n')}${this._workspaceIndex.fileTree.split('\n').length > 80 ? '\n...(truncated)' : ''}`
+      const currentIndex = getIndex();
+      const fileTreeSnippet = currentIndex?.fileTree
+        ? `\n\nProject structure:\n${currentIndex.fileTree.split('\n').slice(0, 80).join('\n')}${currentIndex.fileTree.split('\n').length > 80 ? '\n...(truncated)' : ''}`
         : '';
 
       // Continue.dev-style system prompt: strict, minimal, action-oriented
@@ -870,10 +570,11 @@ CRITICAL RULES FOR TOOL USAGE:
         }
       }
 
-      // 3. TF-IDF RAG: find relevant code chunks
-      if (this._indexBuilt && this._workspaceIndex.chunks.length > 0 && !isNoTool) {
-        const ragResults = retrieveChunks(this._workspaceIndex, input, 5);
-        for (const chunk of ragResults) {
+      // 3. BM25 + Hybrid RAG: find relevant code chunks
+      if (this._indexBuilt) {
+        const ragResults = await hybridRetrieve(input, 8);
+        for (const result of ragResults) {
+          const { chunk } = result;
           if (!enrichedInput.includes(`--- Current contents of ${chunk.filePath}`)) {
             enrichedInput += `\n\n--- Relevant: ${chunk.relativePath} (lines ${chunk.startLine}-${chunk.endLine}) ---\n${chunk.content}\n--- End ---`;
           }
@@ -882,9 +583,6 @@ CRITICAL RULES FOR TOOL USAGE:
 
       messages.push({ role: 'user', content: enrichedInput });
 
-      const controller = new AbortController();
-      cancelToken?.onCancellationRequested(() => controller.abort());
-
       // Model parameters
       const ollamaOptions: Record<string, any> = {};
       if (config) {
@@ -892,7 +590,7 @@ CRITICAL RULES FOR TOOL USAGE:
         if (config.codeTopP != null) ollamaOptions.top_p = Number(config.codeTopP);
       }
 
-      console.log(`[CodeNative AI] Request => model: ${model}, tools: ${isNoTool ? 'OFF' : 'ON'}, chunks: ${this._workspaceIndex.chunks.length}`);
+      console.log(`[CodeNative AI] Request => model: ${model}, tools: ${isNoTool ? 'OFF' : 'ON'}, chunks: ${getIndex()?.chunks.length ?? 0}`);
 
       // ===== AGENT LOOP =====
       if (isNoTool) {
@@ -1210,25 +908,7 @@ CRITICAL RULES FOR TOOL USAGE:
       const controller = new AbortController();
       cancelToken?.onCancellationRequested(() => controller.abort());
 
-      // Try the backend's dedicated completion endpoint first
-      if (this._backendAvailable) {
-        try {
-          const response = await fetch(`${BACKEND_URL}/api/ai/complete`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ code: input.prompt, language: (input as any).language }),
-            signal: controller.signal,
-          });
-          if (response.ok) {
-            const result = await response.json() as { success: boolean; data: string };
-            if (result.success && result.data) {
-              return { sessionId: input.sessionId, codeModelList: [{ content: result.data }] };
-            }
-          }
-        } catch { /* fall through to Ollama */ }
-      }
-
-      // Fallback: call Ollama directly
+      // Call Ollama directly
       const prompt = `Complete the following code. Only output the completion, no explanation:\n\`\`\`\n${input.prompt}\n\`\`\``;
 
       const response = await fetch(`${OLLAMA_URL}/api/chat`, {

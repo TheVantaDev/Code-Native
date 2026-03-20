@@ -40,7 +40,7 @@ export class OllamaStatusContribution implements ClientAppContribution {
             if (isOnline) {
                 this.statusBarService.setElement(OLLAMA_STATUS_ID, {
                     text: '$(check) AI',
-                    tooltip: 'Ollama is running. CodeNative backend provides enhanced RAG context when available.',
+                    tooltip: 'Ollama is running. BM25 + vector hybrid RAG context is active.',
                     color: '#89d185',
                 });
             } else {
