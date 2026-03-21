@@ -8,7 +8,8 @@ import * as path from 'path';
 
 import { IModelConfig } from '../common'
 import { indexProject, getIndex } from './rag/fileIndexer';
-import { hybridRetrieve, indexChunksIntoChroma, resetVectorIndex } from './rag/vectorRetriever';
+import { indexChunksIntoChroma, resetVectorIndex } from './rag/vectorRetriever';
+import { runRAGPipeline, getRAGStatus } from './rag/ragPipeline';
 
 // Ollama API
 const OLLAMA_URL = 'http://127.0.0.1:11434';
@@ -473,36 +474,59 @@ export class AIBackService extends BaseAIBackService implements IAIBackService {
 
       const messages: Array<{ role: string; content: string }> = [];
 
+      // ===== RAG PIPELINE: Query Classification + Context Retrieval =====
+      const ragStatus = getRAGStatus();
+      const ragResult = this._indexBuilt
+        ? await runRAGPipeline(input, {
+            topK: 8,
+            maxTokens: 4000,
+            includeFileTree: false,
+            conversationHistory: (options.history || []).map(msg => ({
+              role: String(msg.role) === 'ai' ? 'assistant' : 'user',
+              content: String(msg.content),
+            })),
+          })
+        : null;
+
+      // Log RAG classification for debugging
+      if (ragResult) {
+        console.log(`[CodeNative AI] RAG: intent=${ragResult.classification.intent}, confidence=${ragResult.classification.confidence.toFixed(2)}, retrieval=${ragResult.retrievalMethod}, chunks=${ragResult.rawResults.length}`);
+      }
+
       // ===== SYSTEM PROMPT =====
       const workspaceInfo = this._workspaceRoot ? `\nWorkspace: ${this._workspaceRoot}` : '';
       const currentIndex = getIndex();
-      const fileTreeSnippet = currentIndex?.fileTree
-        ? `\n\nProject structure:\n${currentIndex.fileTree.split('\n').slice(0, 80).join('\n')}${currentIndex.fileTree.split('\n').length > 80 ? '\n...(truncated)' : ''}`
+      const queryIntent = ragResult?.classification.intent || 'general';
+
+      // Build system prompt: combine RAG-generated prompt with tool instructions
+      // Skip tool instructions for general knowledge questions - they don't need file operations
+      const ragSystemPrompt = ragResult?.systemPrompt || '';
+      const toolInstructions = (isNoTool || queryIntent === 'general') ? '' : `
+
+TOOL USAGE RULES:
+- When asked to create/write/modify a file, you MUST call tools. Do NOT paste code in chat.
+- For simple tasks (create file, replace content), use create_file — one step, done.
+- Only use find_and_replace for surgical edits to LARGE files.
+- File paths MUST be absolute OS paths (e.g. C:/Coding/project/src/main.ts).
+- After tools finish, give a brief summary. Do NOT call more tools unless needed.`;
+
+      const fileTreeSnippet = queryIntent !== 'general' && currentIndex?.fileTree
+        ? `\n\nProject structure:\n${currentIndex.fileTree.split('\n').slice(0, 40).join('\n')}${currentIndex.fileTree.split('\n').length > 40 ? '\n...(truncated)' : ''}`
         : '';
 
-      // Continue.dev-style system prompt: strict, minimal, action-oriented
-      const systemPrompt = `You are an AI coding assistant in CodeNative IDE.${workspaceInfo}
-
-CRITICAL RULES FOR TOOL USAGE:
-- When asked to create/write/modify a file, you MUST call tools to do it. Do NOT paste code in chat instead.
-- For simple tasks (create file, replace all content), use create_file — it's one step, one tool call, done.
-- Only use find_and_replace for surgical edits to LARGE files where you need to change a small part.
-- File paths MUST be absolute OS paths (e.g. C:/Coding/project/src/main.ts).
-- NEVER output the tool call JSON in your response. The system handles tool execution automatically.
-- After tools finish, give a 1-2 sentence summary. Do NOT call more tools unless needed.
-- You MUST use tools for ANY file operation. There is NO exception.
-- If you need to find files or understand the project structure, call list_files first.
-- If the user mentions a file by name but no path, use list_files on the workspace root to find it.${fileTreeSnippet}`;
+      const systemPrompt = ragSystemPrompt
+        ? `${ragSystemPrompt}${workspaceInfo}${toolInstructions}${fileTreeSnippet}`
+        : `You are CodeNative AI, an expert coding assistant.${workspaceInfo}${toolInstructions}${fileTreeSnippet}`;
 
       messages.push({ role: 'system', content: systemPrompt });
 
       // ===== CONVERSATION HISTORY =====
       const history = options.history?.slice(-10) || [];
 
-      // Tool-use priming: when there's no history (new chat), inject a
-      // fake example exchange so the model sees how tools work here.
-      // This prevents the model from just pasting code in chat.
-      if (!isNoTool && history.length === 0 && this._workspaceRoot) {
+      // Tool-use priming: only inject when tools are enabled AND query needs tools
+      // For general questions like "hello world in java", skip priming to get cleaner responses
+      const needsToolPriming = queryIntent === 'code_action' || queryIntent === 'project';
+      if (!isNoTool && needsToolPriming && history.length === 0 && this._workspaceRoot) {
         messages.push({
           role: 'user',
           content: 'Create a file hello.txt with "Hello" in it at C:/example/hello.txt',
@@ -528,10 +552,11 @@ CRITICAL RULES FOR TOOL USAGE:
         });
       }
 
-      // ===== RAG: CONTEXT INJECTION =====
+      // ===== BUILD USER MESSAGE =====
       let enrichedInput = input;
+      let explicitFileContext = '';
 
-      // 1. Auto-detect absolute file paths mentioned in the prompt
+      // 1. Auto-detect absolute file paths mentioned in the prompt (explicit mentions)
       const filePathMatches = input.match(/[A-Za-z]:[\\/][\w\\/.\-]+\.\w+/g);
       if (filePathMatches) {
         for (const rawPath of filePathMatches) {
@@ -542,7 +567,7 @@ CRITICAL RULES FOR TOOL USAGE:
               const truncated = fileContent.length > 3000
                 ? fileContent.substring(0, 3000) + '\n...(truncated)'
                 : fileContent;
-              enrichedInput += `\n\n--- Current contents of ${cleanPath} ---\n${truncated}\n--- End of file ---`;
+              explicitFileContext += `\n<explicit_file path="${cleanPath}">\n${truncated}\n</explicit_file>`;
             } catch { }
           }
         }
@@ -557,27 +582,29 @@ CRITICAL RULES FOR TOOL USAGE:
             if (filePathMatches?.some(p => p.toLowerCase().includes(bareName.toLowerCase()))) continue;
 
             const foundPath = findFileInWorkspace(this._workspaceRoot, bareName);
-            if (foundPath && !enrichedInput.includes(`--- Current contents of ${foundPath}`)) {
+            if (foundPath && !explicitFileContext.includes(foundPath)) {
               try {
                 const fileContent = fs.readFileSync(foundPath, 'utf-8');
                 const truncated = fileContent.length > 3000
                   ? fileContent.substring(0, 3000) + '\n...(truncated)'
                   : fileContent;
-                enrichedInput += `\n\n--- Current contents of ${foundPath} ---\n${truncated}\n--- End of file ---`;
+                explicitFileContext += `\n<explicit_file path="${foundPath}">\n${truncated}\n</explicit_file>`;
               } catch { }
             }
           }
         }
       }
 
-      // 3. BM25 + Hybrid RAG: find relevant code chunks
-      if (this._indexBuilt) {
-        const ragResults = await hybridRetrieve(input, 8);
-        for (const result of ragResults) {
-          const { chunk } = result;
-          if (!enrichedInput.includes(`--- Current contents of ${chunk.filePath}`)) {
-            enrichedInput += `\n\n--- Relevant: ${chunk.relativePath} (lines ${chunk.startLine}-${chunk.endLine}) ---\n${chunk.content}\n--- End ---`;
-          }
+      // 3. Combine: explicit files + RAG context (only if RAG decided to retrieve)
+      const ragContext = ragResult?.context.text || '';
+
+      if (explicitFileContext || ragContext) {
+        // Only inject RAG context if classification says we should
+        if (ragResult?.classification.shouldRetrieve && ragContext) {
+          enrichedInput = `${ragContext}\n\n${explicitFileContext}\n\n<user_query>\n${input}\n</user_query>`;
+        } else if (explicitFileContext) {
+          // Just explicit file mentions, no RAG
+          enrichedInput = `${explicitFileContext}\n\n<user_query>\n${input}\n</user_query>`;
         }
       }
 
@@ -590,13 +617,17 @@ CRITICAL RULES FOR TOOL USAGE:
         if (config.codeTopP != null) ollamaOptions.top_p = Number(config.codeTopP);
       }
 
-      console.log(`[CodeNative AI] Request => model: ${model}, tools: ${isNoTool ? 'OFF' : 'ON'}, chunks: ${getIndex()?.chunks.length ?? 0}`);
+      // ===== ROUTING: Agent Loop vs Simple Chat =====
+      // General/hybrid queries don't need tools - use simple streaming chat
+      // Only code_action and project queries that might need file operations go to agent loop
+      const useTools = !isNoTool && (queryIntent === 'code_action' || queryIntent === 'project');
 
-      // ===== AGENT LOOP =====
-      if (isNoTool) {
-        await this.doStreamingChat(messages, model, stream, controller, ollamaOptions);
-      } else {
+      console.log(`[CodeNative AI] Request => model: ${model}, intent: ${queryIntent}, useTools: ${useTools}, ragChunks: ${ragResult?.rawResults.length ?? 0}`);
+
+      if (useTools) {
         await this.runAgentLoop(messages, model, stream, controller, ollamaOptions);
+      } else {
+        await this.doStreamingChat(messages, model, stream, controller, ollamaOptions);
       }
 
       stream.end();

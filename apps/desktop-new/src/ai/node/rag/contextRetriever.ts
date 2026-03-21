@@ -67,7 +67,7 @@ function computeCorpusStats(chunks: CodeChunk[]): CorpusStats {
   let totalTokens = 0;
   for (const chunk of chunks) {
     totalTokens += chunk.tokenCount;
-    for (const term of chunk.termFrequencies.keys()) {
+    for (const term of Array.from(chunk.termFrequencies.keys())) {
       docFreq.set(term, (docFreq.get(term) ?? 0) + 1);
     }
   }
@@ -76,7 +76,7 @@ function computeCorpusStats(chunks: CodeChunk[]): CorpusStats {
 
   // BM25 IDF: log((N - df + 0.5) / (df + 0.5) + 1)
   const idf = new Map<string, number>();
-  for (const [term, df] of docFreq) {
+  for (const [term, df] of Array.from(docFreq.entries())) {
     idf.set(term, Math.log((N - df + 0.5) / (df + 0.5) + 1));
   }
 

@@ -23,9 +23,31 @@
  * Falls back gracefully to BM25-only when ChromaDB is not running.
  */
 
-import { ChromaClient, Collection } from 'chromadb';
 import { CodeChunk, getIndex } from './fileIndexer';
 import { retrieve as bm25Retrieve, RetrievalResult } from './contextRetriever';
+
+type ChromaCollection = {
+  delete(args: { where: Record<string, unknown> }): Promise<unknown>;
+  add(args: {
+    ids: string[];
+    embeddings: number[][];
+    documents: string[];
+    metadatas: Array<Record<string, string | number>>;
+  }): Promise<unknown>;
+  query(args: {
+    queryEmbeddings: number[][];
+    nResults: number;
+    where: Record<string, unknown>;
+  }): Promise<{
+    ids: string[][];
+    distances?: number[][];
+    metadatas: Array<Array<Record<string, string | number> | null>>;
+  }>;
+};
+
+type ChromaClientLike = {
+  getOrCreateCollection(args: { name: string }): Promise<ChromaCollection>;
+};
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -45,22 +67,44 @@ const RRF_K = 60;
 // ChromaDB client (lazy singleton)
 // ---------------------------------------------------------------------------
 
-let _client: ChromaClient | null = null;
-let _collection: Collection | null = null;
+let _client: ChromaClientLike | null = null;
+let _collection: ChromaCollection | null = null;
 let chromaAvailable = false;
+let _chromaModule: { ChromaClient: new (...args: unknown[]) => ChromaClientLike } | null | undefined;
 
-function getChromaClient(): ChromaClient {
-  if (!_client) {
-    _client = new ChromaClient({ path: CHROMA_URL });
+function getChromaModule(): { ChromaClient: new (...args: unknown[]) => ChromaClientLike } | null {
+  if (_chromaModule !== undefined) return _chromaModule;
+
+  try {
+    _chromaModule = require('chromadb') as { ChromaClient: new (...args: unknown[]) => ChromaClientLike };
+  } catch {
+    _chromaModule = null;
   }
+
+  return _chromaModule;
+}
+
+function getChromaClient(): ChromaClientLike | null {
+  const chroma = getChromaModule();
+  if (!chroma) return null;
+
+  if (!_client) {
+    _client = new chroma.ChromaClient({ path: CHROMA_URL });
+  }
+
   return _client;
 }
 
 /** Get or create the chunk collection. Returns null if ChromaDB is unreachable. */
-async function getCollection(): Promise<Collection | null> {
+async function getCollection(): Promise<ChromaCollection | null> {
   if (_collection) return _collection;
   try {
     const client = getChromaClient();
+    if (!client) {
+      chromaAvailable = false;
+      return null;
+    }
+
     _collection = await client.getOrCreateCollection({ name: COLLECTION_NAME });
     chromaAvailable = true;
     return _collection;
@@ -257,5 +301,6 @@ export function isVectorIndexAvailable(): boolean {
 /** Drop the in-memory collection handle (called on re-index) */
 export function resetVectorIndex(): void {
   _collection = null;
+  _client = null;
   chromaAvailable = false;
 }
