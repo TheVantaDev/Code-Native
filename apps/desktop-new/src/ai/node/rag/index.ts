@@ -64,3 +64,24 @@ export {
   retrieveContext,
 } from './ragPipeline';
 export type { RAGResult, RAGOptions } from './ragPipeline';
+
+// Smart context (fuzzy matching, error recovery)
+export {
+  findSimilarFiles,
+  detectAmbiguousIntent,
+  generateRecoverySuggestions,
+  updateContext,
+  getContextInfo,
+  resolveVagueReference,
+  enhanceQueryWithContext,
+} from './smartContext';
+export type { FileMatch, AmbiguousIntent, RecoverySuggestion } from './smartContext';
+
+// Diff service (inline diff visualization)
+export {
+  captureOriginalContent,
+  computeDiff,
+  formatDiffForChat,
+  clearDiffCache,
+} from './diffService';
+export type { DiffResult, FileDiff, DiffChange, InlineDiffData } from './diffService';

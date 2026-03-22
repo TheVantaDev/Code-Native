@@ -10,6 +10,18 @@ import { IModelConfig } from '../common'
 import { indexProject, getIndex } from './rag/fileIndexer';
 import { indexChunksIntoChroma, resetVectorIndex } from './rag/vectorRetriever';
 import { runRAGPipeline, getRAGStatus } from './rag/ragPipeline';
+import {
+  enhanceQueryWithContext,
+  updateContext,
+  findSimilarFiles,
+  generateRecoverySuggestions,
+  getContextInfo,
+} from './rag/smartContext';
+import {
+  captureOriginalContent,
+  computeDiff,
+  DiffResult,
+} from './rag/diffService';
 
 // Ollama API
 const OLLAMA_URL = 'http://127.0.0.1:11434';
@@ -44,18 +56,24 @@ function cleanFilePath(rawPath: string): string {
 
 // ======================== TOOL DEFINITIONS ========================
 
-// System-message tool format (Continue.dev style) for models that embed tool calls in text.
-// Ollama native tool format is also sent; whichever the model uses will work.
+// Aider-inspired tool definitions with clear file targeting
 const TOOL_DEFINITIONS = [
   {
     type: 'function',
     function: {
       name: 'create_file',
-      description: 'Create a new file or completely overwrite an existing file. This is the PREFERRED way to write files.',
+      description: `Create a NEW file or OVERWRITE an existing file completely.
+
+CRITICAL: If user mentions a specific filename (e.g., "edit TicTacToe.java"), use THAT EXACT filename, not a different name.
+
+When to use:
+- Creating a brand new file that doesn't exist
+- Completely replacing ALL content of an existing file
+- User says "remove all code and put..." or "replace everything in..."`,
       parameters: {
         type: 'object',
         properties: {
-          file_path: { type: 'string', description: 'Absolute OS file path' },
+          file_path: { type: 'string', description: 'Absolute OS file path. MUST match the file user mentioned.' },
           content:   { type: 'string', description: 'Complete file content to write' },
         },
         required: ['file_path', 'content'],
@@ -66,7 +84,12 @@ const TOOL_DEFINITIONS = [
     type: 'function',
     function: {
       name: 'read_file',
-      description: 'Read file contents. Call this before editing.',
+      description: `Read file contents. ALWAYS call this first before editing an existing file.
+
+When to use:
+- Before any edit/modify/update/fix operation
+- When user mentions a file and you need to see its contents
+- Before using find_and_replace`,
       parameters: {
         type: 'object',
         properties: {
@@ -80,12 +103,21 @@ const TOOL_DEFINITIONS = [
     type: 'function',
     function: {
       name: 'find_and_replace',
-      description: 'Replace a text snippet in a file. find_text must be an EXACT substring of the file. If it fails, use create_file with the full updated content.',
+      description: `Replace a specific text snippet in a file. Only for SMALL surgical edits.
+
+IMPORTANT:
+- find_text must be an EXACT substring from read_file output
+- For large changes, use create_file with full updated content instead
+- If this fails, fallback to create_file
+
+When to use:
+- Small edits: fixing a bug, changing a variable name
+- NOT for replacing entire file content`,
       parameters: {
         type: 'object',
         properties: {
           file_path:    { type: 'string', description: 'Absolute OS file path' },
-          find_text:    { type: 'string', description: 'Exact current text to find' },
+          find_text:    { type: 'string', description: 'Exact current text to find (copy from read_file output)' },
           replace_text: { type: 'string', description: 'New text to replace it with' },
         },
         required: ['file_path', 'find_text', 'replace_text'],
@@ -96,7 +128,7 @@ const TOOL_DEFINITIONS = [
     type: 'function',
     function: {
       name: 'list_files',
-      description: 'List files and directories at a path.',
+      description: 'List files and directories at a path. Use to discover project structure.',
       parameters: {
         type: 'object',
         properties: {
@@ -107,10 +139,43 @@ const TOOL_DEFINITIONS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'create_project',
+      description: `Create multiple files at once for a project scaffold.
+
+Use this when user asks to:
+- "create a project", "scaffold a project", "make a new project"
+- "create a todo app", "build a calculator app"
+- Create multiple related files at once
+
+Each file in the array will be created in sequence.`,
+      parameters: {
+        type: 'object',
+        properties: {
+          project_dir: { type: 'string', description: 'Base directory for the project (absolute path)' },
+          files: {
+            type: 'array',
+            description: 'Array of files to create',
+            items: {
+              type: 'object',
+              properties: {
+                path: { type: 'string', description: 'Relative path from project_dir (e.g., "src/App.tsx")' },
+                content: { type: 'string', description: 'File content' },
+              },
+              required: ['path', 'content'],
+            },
+          },
+        },
+        required: ['project_dir', 'files'],
+      },
+    },
+  },
 ];
 
 // All recognized tool names for parsing
-const ALL_TOOL_NAMES = ['create_file', 'create_new_file', 'read_file', 'find_and_replace', 'edit_existing_file', 'list_files'];
+const ALL_TOOL_NAMES = ['create_file', 'create_new_file', 'read_file', 'find_and_replace', 'edit_existing_file', 'list_files', 'create_project'];
 
 /** Normalize legacy tool names to current names */
 function normalizeToolName(name: string): string {
@@ -137,7 +202,58 @@ function clearToolCallHistory() {
   _recentToolCalls.length = 0;
 }
 
-function executeToolCall(rawName: string, args: Record<string, any>): string {
+// Store workspace root for diff relative paths
+let _currentWorkspaceRoot = '';
+
+export function setToolWorkspaceRoot(root: string): void {
+  _currentWorkspaceRoot = root;
+}
+
+interface ToolExecutionResult {
+  message: string;
+  diffResult?: DiffResult;
+}
+
+/**
+ * Fuzzy replace: split findText into individual non-empty lines, find the
+ * region in the file that contains the most of them in order, and replace
+ * that region with replaceText. Returns null if nothing useful was found.
+ */
+function attemptFuzzyReplace(fileContent: string, findText: string, replaceText: string): string | null {
+  const fileLines = fileContent.split('\n');
+  const findLines = findText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+  if (findLines.length === 0) return null;
+
+  // Build a scoring map: for each file line, does it match any findLine?
+  const matchScores: number[] = fileLines.map(line => {
+    const trimmed = line.trim();
+    return findLines.some(fl => trimmed === fl || trimmed.includes(fl) || fl.includes(trimmed)) ? 1 : 0;
+  });
+
+  // Find the window of file lines with the highest match density
+  const windowSize = Math.max(findLines.length * 2, 10);
+  let bestScore = 0;
+  let bestStart = -1;
+
+  for (let i = 0; i <= fileLines.length - findLines.length; i++) {
+    const end = Math.min(i + windowSize, fileLines.length);
+    const score = matchScores.slice(i, end).reduce((a, b) => a + b, 0);
+    if (score > bestScore) {
+      bestScore = score;
+      bestStart = i;
+    }
+  }
+
+  // Need at least 50% of findLines to match for a confident replacement
+  if (bestStart === -1 || bestScore < findLines.length * 0.5) return null;
+
+  const bestEnd = Math.min(bestStart + windowSize, fileLines.length);
+  const before = fileLines.slice(0, bestStart).join('\n');
+  const after = fileLines.slice(bestEnd).join('\n');
+  return [before, replaceText, after].filter(s => s.length > 0).join('\n');
+}
+
+function executeToolCall(rawName: string, args: Record<string, any>): ToolExecutionResult {
   const name = normalizeToolName(rawName);
 
   // Decode HTML entities in ALL string fields (model sometimes generates &quot; etc)
@@ -149,25 +265,46 @@ function executeToolCall(rawName: string, args: Record<string, any>): string {
   // Dedup guard: skip duplicate tool calls (same tool + same file + same content start)
   if (isDuplicateToolCall(name, decodedArgs)) {
     console.log(`[CodeNative AI] Skipping duplicate tool call: ${name}`);
-    return `[Tool skipped: duplicate call to ${name}]`;
+    return { message: `[Tool skipped: duplicate call to ${name}]` };
   }
 
   try {
     if (name === 'create_file') {
       const filePath = cleanFilePath(decodedArgs.file_path || decodedArgs.path || '');
       const content = decodedArgs.content || '';
-      if (!filePath) return '[Tool error: No file_path provided]';
+      if (!filePath) return { message: '[Tool error: No file_path provided]' };
+
+      // Capture original content BEFORE writing
+      captureOriginalContent(filePath);
 
       const dir = path.dirname(filePath);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(filePath, content, 'utf-8');
-      return `[Done: wrote ${filePath} (${content.split('\n').length} lines)]`;
+      updateContext('file_created', filePath); // Track context
+
+      // Compute diff AFTER writing
+      const diffResult = computeDiff(filePath, _currentWorkspaceRoot);
+
+      return {
+        message: `[Done: wrote ${filePath} (${content.split('\n').length} lines)]`,
+        diffResult,
+      };
     }
 
     if (name === 'read_file') {
       const filePath = cleanFilePath(decodedArgs.file_path || decodedArgs.path || '');
-      if (!filePath) return '[Tool error: No file_path provided]';
-      if (!fs.existsSync(filePath)) return `[Tool error: File not found: ${filePath}]`;
+      if (!filePath) return { message: '[Tool error: No file_path provided]' };
+      if (!fs.existsSync(filePath)) {
+        // Smart error recovery: suggest similar files
+        const suggestions = generateRecoverySuggestions(
+          'File not found', 'read_file', decodedArgs, process.cwd()
+        );
+        let errorMsg = `[Tool error: File not found: ${filePath}]`;
+        if (suggestions.length > 0) {
+          errorMsg += `\n\nSuggestions:\n${suggestions.map(s => `- ${s.action}: ${s.reason}`).join('\n')}`;
+        }
+        return { message: errorMsg };
+      }
 
       const content = fs.readFileSync(filePath, 'utf-8');
       const lines = content.split('\n');
@@ -175,30 +312,42 @@ function executeToolCall(rawName: string, args: Record<string, any>): string {
       const truncated = numbered.length > 8000
         ? numbered.substring(0, 8000) + '\n...(truncated)'
         : numbered;
-      return `[Contents of ${filePath} — ${lines.length} lines]\n${truncated}`;
+      updateContext('file_read', filePath); // Track context
+      return { message: `[Contents of ${filePath} — ${lines.length} lines]\n${truncated}` };
     }
 
     if (name === 'find_and_replace') {
       const filePath = cleanFilePath(decodedArgs.file_path || decodedArgs.path || '');
       const findText = decodedArgs.find_text || decodedArgs.old_text || decodedArgs.search || '';
       const replaceText = decodedArgs.replace_text || decodedArgs.new_text || decodedArgs.replacement || '';
-      if (!filePath) return '[Tool error: No file_path provided]';
-      if (!fs.existsSync(filePath)) return `[Tool error: File not found: ${filePath}]`;
-      if (!findText) return '[Tool error: No find_text provided]';
+      if (!filePath) return { message: '[Tool error: No file_path provided]' };
+      if (!fs.existsSync(filePath)) return { message: `[Tool error: File not found: ${filePath}]` };
+      if (!findText) return { message: '[Tool error: No find_text provided]' };
 
       const currentContent = fs.readFileSync(filePath, 'utf-8');
 
       // Ambiguity check (Continue.dev pattern): if find_text matches multiple locations, reject
       const matchCount = currentContent.split(findText).length - 1;
       if (matchCount > 1) {
-        return `[Tool error: find_text matches ${matchCount} locations in ${filePath}. Provide a larger/more unique text snippet, or use create_file with the complete updated content.]`;
+        return { message: `[Tool error: find_text matches ${matchCount} locations in ${filePath}. Provide a larger/more unique text snippet, or use create_file with the complete updated content.]` };
       }
+
+      // Capture original content BEFORE editing
+      captureOriginalContent(filePath);
 
       // Strategy 1: Exact substring match
       if (matchCount === 1) {
         const newContent = currentContent.replace(findText, replaceText);
         fs.writeFileSync(filePath, newContent, 'utf-8');
-        return `[Done: edited ${filePath}]`;
+        updateContext('file_edited', filePath); // Track context
+
+        // Compute diff AFTER editing
+        const diffResult = computeDiff(filePath, _currentWorkspaceRoot);
+
+        return {
+          message: `[Done: edited ${filePath}]`,
+          diffResult,
+        };
       }
 
       // Strategy 2: Trimmed match
@@ -206,7 +355,15 @@ function executeToolCall(rawName: string, args: Record<string, any>): string {
       if (trimmedFind && currentContent.includes(trimmedFind)) {
         const newContent = currentContent.replace(trimmedFind, replaceText.trim());
         fs.writeFileSync(filePath, newContent, 'utf-8');
-        return `[Done: edited ${filePath} (trimmed match)]`;
+        updateContext('file_edited', filePath); // Track context
+
+        // Compute diff AFTER editing
+        const diffResult = computeDiff(filePath, _currentWorkspaceRoot);
+
+        return {
+          message: `[Done: edited ${filePath} (trimmed match)]`,
+          diffResult,
+        };
       }
 
       // Strategy 3: Whitespace-normalized match
@@ -221,19 +378,44 @@ function executeToolCall(rawName: string, args: Record<string, any>): string {
           if (normalizeWs(slice) === normalizedFind) {
             const newContent = currentContent.replace(slice, replaceText);
             fs.writeFileSync(filePath, newContent, 'utf-8');
-            return `[Done: edited ${filePath} (normalized match)]`;
+            updateContext('file_edited', filePath); // Track context
+
+            // Compute diff AFTER editing
+            const diffResult = computeDiff(filePath, _currentWorkspaceRoot);
+
+            return {
+              message: `[Done: edited ${filePath} (normalized match)]`,
+              diffResult,
+            };
           }
         }
       }
 
-      return `[Tool error: Text not found in ${filePath}. Use create_file with the complete updated file content instead.]`;
+      // Strategy 3 failed — fall through to Strategy 4
+
+      // ===== STRATEGY 4: Auto-fallback — rewrite the full file with best-effort substitution =====
+      // This ensures edits NEVER silently fail. Find the closest matching region and replace it.
+      const fallbackContent = attemptFuzzyReplace(currentContent, findText, replaceText);
+      if (fallbackContent !== null) {
+        captureOriginalContent(filePath);
+        fs.writeFileSync(filePath, fallbackContent, 'utf-8');
+        updateContext('file_edited', filePath);
+        const diffResult = computeDiff(filePath, _currentWorkspaceRoot);
+        return {
+          message: `[Done: edited ${filePath} (fuzzy fallback)]`,
+          diffResult,
+        };
+      }
+
+      // Last resort: tell the model to use create_file
+      return { message: `[Tool error: Text not found in ${filePath}. Please use create_file with the complete updated file content to apply your changes.]` };
     }
 
     if (name === 'list_files') {
       const dirPath = cleanFilePath(decodedArgs.dir_path || decodedArgs.path || '');
       const recursive = decodedArgs.recursive === true;
-      if (!dirPath) return '[Tool error: No dir_path provided]';
-      if (!fs.existsSync(dirPath)) return `[Tool error: Directory not found: ${dirPath}]`;
+      if (!dirPath) return { message: '[Tool error: No dir_path provided]' };
+      if (!fs.existsSync(dirPath)) return { message: `[Tool error: Directory not found: ${dirPath}]` };
 
       const IGNORE_DIRS = new Set([
         'node_modules', '.git', 'out', 'build', 'dist', 'target',
@@ -269,12 +451,45 @@ function executeToolCall(rawName: string, args: Record<string, any>): string {
 
       listDir(dirPath, '', 0);
       const suffix = entries.length >= maxEntries ? '\n...(truncated)' : '';
-      return `[Contents of ${dirPath}]\n${entries.join('\n')}${suffix}`;
+      return { message: `[Contents of ${dirPath}]\n${entries.join('\n')}${suffix}` };
     }
 
-    return `[Tool error: Unknown tool "${name}"]`;
+    if (name === 'create_project') {
+      const projectDir = cleanFilePath(decodedArgs.project_dir || '');
+      const files = decodedArgs.files || [];
+      if (!projectDir) return { message: '[Tool error: No project_dir provided]' };
+      if (!Array.isArray(files) || files.length === 0) return { message: '[Tool error: No files provided]' };
+
+      // Create project directory if it doesn't exist
+      if (!fs.existsSync(projectDir)) {
+        fs.mkdirSync(projectDir, { recursive: true });
+      }
+
+      const results: string[] = [];
+      for (const file of files) {
+        try {
+          const relativePath = file.path || '';
+          const content = file.content || '';
+          if (!relativePath) continue;
+
+          const fullPath = path.join(projectDir, relativePath);
+          const dir = path.dirname(fullPath);
+          if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true });
+          }
+          fs.writeFileSync(fullPath, content, 'utf-8');
+          results.push(`  ✓ ${relativePath} (${content.split('\n').length} lines)`);
+        } catch (err: any) {
+          results.push(`  ✗ ${file.path}: ${err.message}`);
+        }
+      }
+
+      return { message: `[Project created at ${projectDir}]\nFiles created:\n${results.join('\n')}` };
+    }
+
+    return { message: `[Tool error: Unknown tool "${name}"]` };
   } catch (err: any) {
-    return `[Tool error: ${err.message || String(err)}]`;
+    return { message: `[Tool error: ${err.message || String(err)}]` };
   }
 }
 
@@ -344,6 +559,7 @@ export class AIBackService extends BaseAIBackService implements IAIBackService {
 
     this._workspaceRoot = cleanDir;
     this._indexBuilt = false;
+    setToolWorkspaceRoot(cleanDir); // Set workspace root for diff service
     console.log(`[CodeNative AI] Workspace root set to: ${cleanDir}`);
 
     // Build BM25 index asynchronously
@@ -474,6 +690,16 @@ export class AIBackService extends BaseAIBackService implements IAIBackService {
 
       const messages: Array<{ role: string; content: string }> = [];
 
+      // ===== SMART CONTEXT: Enhance query with context understanding =====
+      const smartContext = this._workspaceRoot
+        ? enhanceQueryWithContext(input, this._workspaceRoot)
+        : { enhancedQuery: input, systemNote: '', resolvedFile: null };
+
+      // Log smart context for debugging
+      if (smartContext.systemNote) {
+        console.log(`[CodeNative AI] SmartContext: ${smartContext.systemNote}`);
+      }
+
       // ===== RAG PIPELINE: Query Classification + Context Retrieval =====
       const ragStatus = getRAGStatus();
       const ragResult = this._indexBuilt
@@ -503,45 +729,82 @@ export class AIBackService extends BaseAIBackService implements IAIBackService {
       const ragSystemPrompt = ragResult?.systemPrompt || '';
       const toolInstructions = (isNoTool || queryIntent === 'general') ? '' : `
 
-TOOL USAGE RULES:
-- When asked to create/write/modify a file, you MUST call tools. Do NOT paste code in chat.
-- For simple tasks (create file, replace content), use create_file — one step, done.
-- Only use find_and_replace for surgical edits to LARGE files.
-- File paths MUST be absolute OS paths (e.g. C:/Coding/project/src/main.ts).
-- After tools finish, give a brief summary. Do NOT call more tools unless needed.`;
+## FILE OPERATIONS - AIDER-STYLE RULES
+
+### ⚠️ CRITICAL OUTPUT RULES:
+- NEVER output raw JSON objects like {"thoughts":..., "response":...} or {"name":..., "arguments":...}
+- NEVER output explanation text wrapped in JSON
+- ONLY use structured tool_calls to execute tools
+- If you want to explain something, write plain text THEN call the tool
+
+### TOOLS AVAILABLE:
+1. **create_file** - Create new file OR completely overwrite existing file with full content
+2. **read_file** - Read file contents (ALWAYS call this before editing)
+3. **find_and_replace** - Small surgical edits only
+4. **list_files** - Discover project structure
+
+### CRITICAL FILE TARGETING RULE:
+When user mentions a specific file (e.g., "edit TicTacToe.java", "fix Main.py"):
+- Use THAT EXACT filename - do NOT create a different file
+- Example: "edit TicTacToe.java" → edit TicTacToe.java, NOT TicTacToeGame.java
+
+### WORKFLOW:
+1. **New file**: call create_file with new path and COMPLETE file content
+2. **Edit existing file** (e.g. "change all code to merge sort"):
+   - Step 1: call read_file to see current content
+   - Step 2: call create_file to OVERWRITE with the new complete content
+   - Do NOT use find_and_replace for large rewrites
+3. **Small fix** (single line/variable): read_file → find_and_replace
+
+### PATHS:
+- Workspace: ${this._workspaceRoot || 'not set'}
+- Always use absolute paths: ${this._workspaceRoot}/filename.ext
+- If user says "TicTacToe.java", path is: ${this._workspaceRoot}/TicTacToe.java
+
+### OUTPUT FORMAT:
+- Write one sentence explaining what you will do
+- Call the tool (system executes automatically)
+- Write a short confirmation after (1-2 sentences)
+- NEVER output code blocks manually - the tool writes the file for you
+- NEVER output JSON with "thoughts" or "response" keys`;
 
       const fileTreeSnippet = queryIntent !== 'general' && currentIndex?.fileTree
         ? `\n\nProject structure:\n${currentIndex.fileTree.split('\n').slice(0, 40).join('\n')}${currentIndex.fileTree.split('\n').length > 40 ? '\n...(truncated)' : ''}`
         : '';
 
+      // Add smart context hints (resolved file references, recent files)
+      const smartContextHint = smartContext.systemNote
+        ? `\n\n## CONTEXT FROM CONVERSATION:\n${smartContext.systemNote}`
+        : '';
+
       const systemPrompt = ragSystemPrompt
-        ? `${ragSystemPrompt}${workspaceInfo}${toolInstructions}${fileTreeSnippet}`
-        : `You are CodeNative AI, an expert coding assistant.${workspaceInfo}${toolInstructions}${fileTreeSnippet}`;
+        ? `${ragSystemPrompt}${workspaceInfo}${toolInstructions}${smartContextHint}${fileTreeSnippet}`
+        : `You are CodeNative AI, an expert coding assistant.${workspaceInfo}${toolInstructions}${smartContextHint}${fileTreeSnippet}`;
 
       messages.push({ role: 'system', content: systemPrompt });
 
       // ===== CONVERSATION HISTORY =====
       const history = options.history?.slice(-10) || [];
 
-      // Tool-use priming: only inject when tools are enabled AND query needs tools
-      // For general questions like "hello world in java", skip priming to get cleaner responses
+      // Tool-use priming: show the model how to use tools correctly
       const needsToolPriming = queryIntent === 'code_action' || queryIntent === 'project';
       if (!isNoTool && needsToolPriming && history.length === 0 && this._workspaceRoot) {
+        // Example 1: Create a new file
         messages.push({
           role: 'user',
-          content: 'Create a file hello.txt with "Hello" in it at C:/example/hello.txt',
+          content: `Create a file called greet.py in ${this._workspaceRoot} with a function that prints "Hello"`,
         });
         messages.push({
           role: 'assistant',
-          content: 'I\'ll create that file for you.',
+          content: `I'll create greet.py for you.`,
         });
         messages.push({
           role: 'tool',
-          content: '[Done: wrote C:/example/hello.txt (1 lines)]',
+          content: `[Done: wrote ${this._workspaceRoot}/greet.py (4 lines)]`,
         });
         messages.push({
           role: 'assistant',
-          content: 'Created `hello.txt` with the content "Hello".',
+          content: `Created \`greet.py\` with a greeting function.`,
         });
       }
 
@@ -691,10 +954,18 @@ TOOL USAGE RULES:
           const toolArgs = tc.function?.arguments || {};
 
           stream.emitData({ kind: 'content', content: `\n> **${this.toolDisplayName(toolName, toolArgs)}**\n` });
-          const result = executeToolCall(toolName, toolArgs);
-          stream.emitData({ kind: 'content', content: `${result}\n` });
+          const toolResult = executeToolCall(toolName, toolArgs);
+          stream.emitData({ kind: 'content', content: `${toolResult.message}\n` });
 
-          messages.push({ role: 'tool', content: result });
+          // Emit rich diff block when file was modified
+          if (toolResult.diffResult?.diff) {
+            const diffMd = this.formatRichDiff(toolResult.diffResult);
+            if (diffMd) {
+              stream.emitData({ kind: 'content', content: `\n${diffMd}\n` });
+            }
+          }
+
+          messages.push({ role: 'tool', content: toolResult.message });
         }
         continue; // next round
       }
@@ -719,9 +990,18 @@ TOOL USAGE RULES:
         for (const parsed of parsedCalls) {
           const toolName = normalizeToolName(parsed.name);
           stream.emitData({ kind: 'content', content: `\n> **${this.toolDisplayName(toolName, parsed.args)}**\n` });
-          const result = executeToolCall(toolName, parsed.args);
-          stream.emitData({ kind: 'content', content: `${result}\n` });
-          allResults += result + '\n';
+          const toolResult = executeToolCall(toolName, parsed.args);
+          stream.emitData({ kind: 'content', content: `${toolResult.message}\n` });
+
+          // Emit rich diff block when file was modified
+          if (toolResult.diffResult?.diff) {
+            const diffMd = this.formatRichDiff(toolResult.diffResult);
+            if (diffMd) {
+              stream.emitData({ kind: 'content', content: `\n${diffMd}\n` });
+            }
+          }
+
+          allResults += toolResult.message + '\n';
         }
 
         // Follow-up prompt: short, prevents the model from looping
@@ -761,9 +1041,47 @@ TOOL USAGE RULES:
     }
   }
 
+  /**
+   * Format a DiffResult as a rich markdown block for display in chat.
+   * Uses unified diff syntax with a clear header showing stats.
+   */
+  private formatRichDiff(diffResult: DiffResult): string {
+    if (!diffResult.diff || !diffResult.unifiedDiff) return '';
+
+    const { relativePath, summary } = diffResult.diff;
+    const statsLine = [
+      summary.additions > 0 ? `+${summary.additions}` : '',
+      summary.deletions > 0 ? `-${summary.deletions}` : '',
+    ].filter(Boolean).join('  ');
+
+    const lines: string[] = [];
+    lines.push(`**📄 ${relativePath}** · ${statsLine}`);
+    lines.push('');
+    lines.push('```diff');
+    lines.push(diffResult.unifiedDiff);
+    lines.push('```');
+
+    return lines.join('\n');
+  }
+
   /** Strip tool call JSON, markdown JSON blocks, and verbose tool explanations from model text */
   private stripToolTextFromResponse(text: string): string {
     let cleaned = text;
+
+    // ===== CRITICAL: Strip "thoughts/response" JSON format (Qwen/Llama quirk) =====
+    // Models like Qwen sometimes output: {"thoughts": "...", "response": "...", "next_steps": []}
+    // This is NOT a tool call - it is the model generating raw JSON as its response.
+    // We extract the "response" field and discard the rest.
+    cleaned = cleaned.replace(
+      /\{\s*"thoughts"\s*:[\s\S]*?"response"\s*:\s*"((?:[^"\\]|\\.)*?)"[\s\S]*?\}/g,
+      (_match, response) => response.replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\"/g, '"'),
+    );
+
+    // Also strip any leftover thinking output wrapped in {"response":"..."} without "thoughts"
+    cleaned = cleaned.replace(
+      /\{\s*"response"\s*:\s*"((?:[^"\\]|\\.)*?)"\s*\}/g,
+      (_match, response) => response.replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\"/g, '"'),
+    );
 
     // Remove markdown JSON code blocks containing tool calls
     cleaned = cleaned.replace(/```(?:json)?\s*\{[\s\S]*?\}\s*```/g, '');
@@ -886,16 +1204,18 @@ TOOL USAGE RULES:
         }
       }
       // Bare argument structure — infer tool from argument shape
-      if (obj.file_path && obj.content) {
-        results.push({ name: 'create_file', args: obj });
+      // NOTE: Models use "path" OR "file_path" — check both
+      const fp = obj.file_path || obj.path || '';
+      if (fp && obj.content) {
+        results.push({ name: 'create_file', args: { ...obj, file_path: fp } });
         return true;
       }
-      if (obj.file_path && (obj.find_text || obj.old_text) && (obj.replace_text || obj.new_text)) {
-        results.push({ name: 'find_and_replace', args: obj });
+      if (fp && (obj.find_text || obj.old_text) && (obj.replace_text || obj.new_text)) {
+        results.push({ name: 'find_and_replace', args: { ...obj, file_path: fp } });
         return true;
       }
-      if (obj.file_path && !obj.content && !obj.find_text && !obj.old_text) {
-        results.push({ name: 'read_file', args: obj });
+      if (fp && !obj.content && !obj.find_text && !obj.old_text) {
+        results.push({ name: 'read_file', args: { ...obj, file_path: fp } });
         return true;
       }
       if (obj.dir_path) {
@@ -905,10 +1225,13 @@ TOOL USAGE RULES:
       return false;
     };
 
+    // Pre-process: decode HTML entities BEFORE JSON parsing (model outputs &quot; etc)
+    const cleanedText = decodeHtmlEntities(text);
+
     // Strategy 1: Find all markdown JSON blocks
     const codeBlockRegex = /```(?:json)?\s*([\s\S]*?)```/gi;
     let match;
-    while ((match = codeBlockRegex.exec(text)) !== null) {
+    while ((match = codeBlockRegex.exec(cleanedText)) !== null) {
       try {
         const obj = JSON.parse(match[1]);
         if (processParsedObject(obj)) continue;
@@ -918,14 +1241,47 @@ TOOL USAGE RULES:
     if (results.length > 0) return results;
 
     // Strategy 2: Find largest { ... } substring and parse
-    const firstBrace = text.indexOf('{');
-    const lastBrace = text.lastIndexOf('}');
+    const firstBrace = cleanedText.indexOf('{');
+    const lastBrace = cleanedText.lastIndexOf('}');
     if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-      const possibleJson = text.substring(firstBrace, lastBrace + 1);
+      const possibleJson = cleanedText.substring(firstBrace, lastBrace + 1);
       try {
         const obj = JSON.parse(possibleJson);
         processParsedObject(obj);
       } catch { }
+    }
+
+    if (results.length > 0) return results;
+
+    // Strategy 3: Auto-extract raw code blocks when model dumps code instead of calling tools
+    // Detect: the model output contains a fenced code block (```java ... ```) AND mentions a file path
+    // This handles the case where the model outputs code explanation + code block instead of tool calling
+    if (this._workspaceRoot) {
+      const codeBlockContentRegex = /```(?:java|python|javascript|typescript|c|cpp|go|rust|html|css|json|xml|yaml|sh|bash|ruby|php|swift|kotlin|scala|dart|r|sql)\s*\n([\s\S]*?)```/gi;
+      let codeMatch;
+      while ((codeMatch = codeBlockContentRegex.exec(text)) !== null) {
+        const codeContent = codeMatch[1].trim();
+        if (codeContent.length < 10) continue; // skip tiny snippets
+
+        // Find a file path mentioned in the text (either absolute or bare filename)
+        const absPathMatch = text.match(/[A-Za-z]:[\\/][\w\\/.\\-]+\.\w+/);
+        const bareFileMatch = text.match(/\b([A-Za-z0-9_\-]+\.(java|py|js|ts|tsx|jsx|c|cpp|h|go|rs|html|css|json|xml|yaml|yml|sh|rb|php|swift|kt|scala|dart|r|sql))\b/i);
+
+        let targetPath = '';
+        if (absPathMatch) {
+          targetPath = cleanFilePath(absPathMatch[0]);
+        } else if (bareFileMatch) {
+          targetPath = path.join(this._workspaceRoot, bareFileMatch[1]);
+        }
+
+        if (targetPath) {
+          console.log(`[CodeNative AI] Strategy 3: Auto-extracting code block → ${targetPath}`);
+          results.push({
+            name: 'create_file',
+            args: { file_path: targetPath, content: codeContent },
+          });
+        }
+      }
     }
 
     return results;

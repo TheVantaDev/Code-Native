@@ -42,19 +42,44 @@ const PROJECT_KEYWORDS = [
 const GENERAL_KEYWORDS = [
   // Greetings (should never trigger project context)
   'hello', 'hi', 'hey', 'greetings', 'good morning', 'good evening',
-  // General programming questions
+  // General programming questions (NOT file operations)
   'hello world', 'how to', 'what is', 'explain',
   'tutorial', 'example of', 'syntax for', 'best practice',
   'difference between', 'compare', 'vs', 'versus',
-  'create a new', 'write a', 'make a', 'build a',
   'simple example', 'basic', 'beginner', 'introduction',
+  'give me code', 'show me code', 'code for',
 ];
 
-// Keywords that suggest code actions in project
+// Keywords that suggest code actions (file operations) in project
 const ACTION_KEYWORDS = [
+  // File operations - HIGHEST PRIORITY
+  'create a file', 'create file', 'make a file', 'make file',
+  'write a file', 'write file', 'write to file', 'save file',
+  'new file', 'add file', 'generate file',
+  'create a new file', 'make a new file',
+  // Edit operations
+  'edit file', 'edit the file', 'modify file', 'update file', 'change file',
+  'fix the file', 'fix file', 'fix this file',
+  // General code actions
   'fix', 'debug', 'refactor', 'optimize', 'improve',
   'add to', 'update', 'modify', 'change', 'edit',
   'implement', 'create in', 'add feature', 'extend',
+  'delete', 'remove', 'rename',
+];
+
+// Patterns that STRONGLY indicate file operation (code_action)
+const FILE_ACTION_PATTERNS = [
+  /\bcreate\s+(a\s+)?(new\s+)?file\b/i,
+  /\bmake\s+(a\s+)?(new\s+)?file\b/i,
+  /\bwrite\s+(a\s+)?(new\s+)?file\b/i,
+  /\bsave\s+(this\s+)?as\b/i,
+  /\bedit\s+(the\s+)?file\b/i,
+  /\bmodify\s+(the\s+)?file\b/i,
+  /\bupdate\s+(the\s+)?file\b/i,
+  /\bfix\s+(the\s+)?file\b/i,
+  /\bcreate\s+[\w-]+\.(ts|tsx|js|jsx|py|java|go|rs|cpp|c|h|txt|json|html|css)\b/i,
+  /\bmake\s+[\w-]+\.(ts|tsx|js|jsx|py|java|go|rs|cpp|c|h|txt|json|html|css)\b/i,
+  /\bwrite\s+[\w-]+\.(ts|tsx|js|jsx|py|java|go|rs|cpp|c|h|txt|json|html|css)\b/i,
 ];
 
 // File/path patterns that indicate project reference
@@ -75,6 +100,19 @@ const PATH_PATTERNS = [
 export function classifyQuery(query: string): ClassificationResult {
   const queryLower = query.toLowerCase().trim();
   const index = getIndex();
+
+  // PRIORITY CHECK: File operation patterns get immediate code_action classification
+  for (const pattern of FILE_ACTION_PATTERNS) {
+    if (pattern.test(query)) {
+      return {
+        intent: 'code_action',
+        confidence: 0.95,
+        reasoning: 'Query explicitly requests file operation',
+        shouldRetrieve: true,
+        suggestedTopK: 6,
+      };
+    }
+  }
 
   let projectScore = 0;
   let generalScore = 0;
@@ -97,7 +135,7 @@ export function classifyQuery(query: string): ClassificationResult {
   // Check for action keywords
   for (const keyword of ACTION_KEYWORDS) {
     if (queryLower.includes(keyword)) {
-      actionScore += 1.5;
+      actionScore += 3; // Increased weight for action keywords
     }
   }
 
@@ -125,9 +163,9 @@ export function classifyQuery(query: string): ClassificationResult {
   }
 
   // Short queries with just language names are usually general
+  // BUT NOT if they have file extensions or action words
   const shortGeneralPatterns = [
     /^(hello world|print|log|console|echo)\s+(in\s+)?\w+$/i,
-    /^(create|write|make)\s+(a\s+)?(simple\s+)?\w+\s+(in\s+|using\s+)?\w+$/i,
     /^what\s+is\s+\w+(\s+in\s+\w+)?$/i,
     /^how\s+to\s+\w+\s+in\s+\w+$/i,
   ];
