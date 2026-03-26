@@ -142,6 +142,31 @@ When to use:
   {
     type: 'function',
     function: {
+      name: 'search_code',
+      description: `Search for code patterns, function definitions, class names, imports, or any text across the codebase.
+
+Use this when:
+- Looking for where a function/class/variable is defined
+- Finding all usages of a symbol
+- Searching for specific patterns or imports
+- Understanding how something is used in the codebase
+
+Returns matching lines with file paths and line numbers.`,
+      parameters: {
+        type: 'object',
+        properties: {
+          pattern: { type: 'string', description: 'Text or regex pattern to search for (e.g., "function handleClick", "class User", "import.*lodash")' },
+          file_pattern: { type: 'string', description: 'Optional glob pattern to filter files (e.g., "*.ts", "*.java", "src/**/*.py"). Default: all code files.' },
+          case_sensitive: { type: 'boolean', description: 'Case-sensitive search. Default: false (case-insensitive).' },
+          max_results: { type: 'number', description: 'Maximum number of results to return. Default: 20.' },
+        },
+        required: ['pattern'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'create_project',
       description: `Create multiple files at once for a project scaffold.
 
@@ -175,7 +200,7 @@ Each file in the array will be created in sequence.`,
 ];
 
 // All recognized tool names for parsing
-const ALL_TOOL_NAMES = ['create_file', 'create_new_file', 'read_file', 'find_and_replace', 'edit_existing_file', 'list_files', 'create_project'];
+const ALL_TOOL_NAMES = ['create_file', 'create_new_file', 'read_file', 'find_and_replace', 'edit_existing_file', 'list_files', 'search_code', 'create_project'];
 
 /** Normalize legacy tool names to current names */
 function normalizeToolName(name: string): string {
@@ -452,6 +477,108 @@ function executeToolCall(rawName: string, args: Record<string, any>): ToolExecut
       listDir(dirPath, '', 0);
       const suffix = entries.length >= maxEntries ? '\n...(truncated)' : '';
       return { message: `[Contents of ${dirPath}]\n${entries.join('\n')}${suffix}` };
+    }
+
+    if (name === 'search_code') {
+      const pattern = decodedArgs.pattern || '';
+      const filePattern = decodedArgs.file_pattern || '';
+      const caseSensitive = decodedArgs.case_sensitive === true;
+      const maxResults = Math.min(decodedArgs.max_results || 20, 50);
+
+      if (!pattern) return { message: '[Tool error: No search pattern provided]' };
+
+      const searchRoot = _currentWorkspaceRoot || process.cwd();
+      const results: Array<{ file: string; line: number; text: string }> = [];
+
+      const IGNORE_DIRS = new Set([
+        'node_modules', '.git', 'out', 'build', 'dist', 'target',
+        '.cache', '.next', '__pycache__', '.vscode', '.idea', 'coverage',
+      ]);
+
+      const CODE_EXTENSIONS = new Set([
+        '.js', '.ts', '.tsx', '.jsx', '.py', '.java', '.c', '.cpp', '.h', '.hpp',
+        '.go', '.rs', '.rb', '.php', '.swift', '.kt', '.scala', '.cs', '.vue',
+        '.html', '.css', '.scss', '.sass', '.less', '.json', '.xml', '.yaml', '.yml',
+        '.md', '.txt', '.sql', '.sh', '.bash', '.zsh', '.ps1', '.bat', '.cmd',
+      ]);
+
+      // Build regex for matching
+      let regex: RegExp;
+      try {
+        regex = new RegExp(pattern, caseSensitive ? 'g' : 'gi');
+      } catch {
+        // If invalid regex, treat as literal string
+        const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        regex = new RegExp(escaped, caseSensitive ? 'g' : 'gi');
+      }
+
+      // Build file pattern matcher
+      const matchesFilePattern = (filePath: string): boolean => {
+        if (!filePattern) return true;
+        const fileName = path.basename(filePath);
+        const ext = path.extname(filePath).toLowerCase();
+
+        // Simple glob patterns: *.ts, *.java, src/**/*.py
+        if (filePattern.startsWith('*.')) {
+          return ext === filePattern.slice(1) || ext === '.' + filePattern.slice(2);
+        }
+        if (filePattern.includes('**')) {
+          const parts = filePattern.split('**');
+          const prefix = parts[0].replace(/\//g, path.sep);
+          const suffix = parts[1]?.replace(/\//g, path.sep) || '';
+          const relativePath = path.relative(searchRoot, filePath);
+          return relativePath.startsWith(prefix.replace(/\/$/, '')) &&
+                 (suffix ? relativePath.endsWith(suffix.replace(/^\/?\*/, '')) : true);
+        }
+        return fileName.includes(filePattern) || filePath.includes(filePattern);
+      };
+
+      // Recursive search function
+      function searchDir(dir: string, depth: number) {
+        if (results.length >= maxResults || depth > 8) return;
+        try {
+          const items = fs.readdirSync(dir, { withFileTypes: true });
+          for (const item of items) {
+            if (results.length >= maxResults) break;
+            const fullPath = path.join(dir, item.name);
+
+            if (item.isDirectory()) {
+              if (IGNORE_DIRS.has(item.name)) continue;
+              searchDir(fullPath, depth + 1);
+            } else {
+              const ext = path.extname(item.name).toLowerCase();
+              if (!CODE_EXTENSIONS.has(ext)) continue;
+              if (!matchesFilePattern(fullPath)) continue;
+
+              try {
+                const content = fs.readFileSync(fullPath, 'utf-8');
+                const lines = content.split('\n');
+                for (let i = 0; i < lines.length && results.length < maxResults; i++) {
+                  if (regex.test(lines[i])) {
+                    results.push({
+                      file: path.relative(searchRoot, fullPath),
+                      line: i + 1,
+                      text: lines[i].trim().slice(0, 120),
+                    });
+                  }
+                  // Reset regex lastIndex for global flag
+                  regex.lastIndex = 0;
+                }
+              } catch { /* skip unreadable files */ }
+            }
+          }
+        } catch { /* skip unreadable dirs */ }
+      }
+
+      searchDir(searchRoot, 0);
+
+      if (results.length === 0) {
+        return { message: `[Search: No matches found for "${pattern}"${filePattern ? ` in ${filePattern}` : ''}]` };
+      }
+
+      const formatted = results.map(r => `${r.file}:${r.line}: ${r.text}`).join('\n');
+      const truncated = results.length >= maxResults ? `\n...(showing first ${maxResults} results)` : '';
+      return { message: `[Search results for "${pattern}" — ${results.length} matches]\n${formatted}${truncated}` };
     }
 
     if (name === 'create_project') {
@@ -742,6 +869,7 @@ export class AIBackService extends BaseAIBackService implements IAIBackService {
 2. **read_file** - Read file contents (ALWAYS call this before editing)
 3. **find_and_replace** - Small surgical edits only
 4. **list_files** - Discover project structure
+5. **search_code** - Search for patterns, function definitions, imports across the codebase
 
 ### CRITICAL FILE TARGETING RULE:
 When user mentions a specific file (e.g., "edit TicTacToe.java", "fix Main.py"):
@@ -1026,7 +1154,7 @@ When user mentions a specific file (e.g., "edit TicTacToe.java", "fix Main.py"):
         messages.push({ role: 'assistant', content: textContent });
         messages.push({
           role: 'user',
-          content: `You need to actually use the tools to complete this task. Output a JSON object with "name" (one of: create_file, read_file, find_and_replace, list_files) and "arguments" containing the required parameters. Do not just describe what you would do - call the tool.`,
+          content: `You need to actually use the tools to complete this task. Output a JSON object with "name" (one of: create_file, read_file, find_and_replace, list_files, search_code) and "arguments" containing the required parameters. Do not just describe what you would do - call the tool.`,
         });
         continue; // retry with explicit instruction
       }
@@ -1056,6 +1184,7 @@ When user mentions a specific file (e.g., "edit TicTacToe.java", "fix Main.py"):
       case 'read_file': return `Reading ${shortFile}`;
       case 'find_and_replace': return `Editing ${shortFile}`;
       case 'list_files': return `Listing ${shortFile || 'directory'}`;
+      case 'search_code': return `Searching for "${(args.pattern || '').slice(0, 30)}"`;
       default: return name;
     }
   }
@@ -1259,6 +1388,11 @@ When user mentions a specific file (e.g., "edit TicTacToe.java", "fix Main.py"):
       }
       if (obj.dir_path || obj.directory || obj.folder) {
         results.push({ name: 'list_files', args: { dir_path: obj.dir_path || obj.directory || obj.folder } });
+        return true;
+      }
+      // Detect search_code from bare arguments
+      if (obj.pattern || obj.search_pattern || obj.query) {
+        results.push({ name: 'search_code', args: { pattern: obj.pattern || obj.search_pattern || obj.query, ...obj } });
         return true;
       }
       return false;
