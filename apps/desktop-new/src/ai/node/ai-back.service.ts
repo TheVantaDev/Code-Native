@@ -951,7 +951,11 @@ When user mentions a specific file (e.g., "edit TicTacToe.java", "fix Main.py"):
 
         for (const tc of msg.tool_calls) {
           const toolName = normalizeToolName(tc.function?.name || '');
-          const toolArgs = tc.function?.arguments || {};
+          // CRITICAL: Ollama sometimes returns arguments as JSON string, not object
+          let toolArgs = tc.function?.arguments || {};
+          if (typeof toolArgs === 'string') {
+            try { toolArgs = JSON.parse(toolArgs); } catch { toolArgs = {}; }
+          }
 
           stream.emitData({ kind: 'content', content: `\n> **${this.toolDisplayName(toolName, toolArgs)}**\n` });
           const toolResult = executeToolCall(toolName, toolArgs);
@@ -1010,6 +1014,21 @@ When user mentions a specific file (e.g., "edit TicTacToe.java", "fix Main.py"):
           content: `Tool results:\n${allResults}\nIf the task is complete, give a SHORT summary (1-2 sentences). If more steps are needed, proceed.`,
         });
         continue; // next round
+      }
+
+      // === PATH B.5: Retry if model seems to want to use tools but didn't format correctly ===
+      const looksLikeToolIntent = /(?:create|write|read|edit|modify|update|add|fix|change).*(?:file|code)/i.test(textContent)
+        || /(?:I'll|I will|Let me).*(?:create|write|read|edit)/i.test(textContent)
+        || /```(?:json)?\s*\{/i.test(textContent); // Started JSON but we couldn't parse it
+
+      if (looksLikeToolIntent && round < MAX_ROUNDS - 1) {
+        console.log(`[CodeNative AI] Round ${round + 1}: Model seems to want tools but didn't call them - retrying`);
+        messages.push({ role: 'assistant', content: textContent });
+        messages.push({
+          role: 'user',
+          content: `You need to actually use the tools to complete this task. Output a JSON object with "name" (one of: create_file, read_file, find_and_replace, list_files) and "arguments" containing the required parameters. Do not just describe what you would do - call the tool.`,
+        });
+        continue; // retry with explicit instruction
       }
 
       // === PATH C: No tool calls — just text response. Done. ===
@@ -1181,6 +1200,22 @@ When user mentions a specific file (e.g., "edit TicTacToe.java", "fix Main.py"):
     const toolNames = ALL_TOOL_NAMES;
 
     const processParsedObject = (obj: any): boolean => {
+      // Handle arrays - process each item
+      if (Array.isArray(obj)) {
+        let found = false;
+        for (const item of obj) {
+          if (processParsedObject(item)) found = true;
+        }
+        return found;
+      }
+      // Handle tool_calls wrapper: { tool_calls: [...] }
+      if (obj.tool_calls && Array.isArray(obj.tool_calls)) {
+        let found = false;
+        for (const tc of obj.tool_calls) {
+          if (processParsedObject(tc)) found = true;
+        }
+        return found;
+      }
       // Direct structure: { name: "...", arguments: { ... } }
       if (obj.name && toolNames.includes(obj.name)) {
         const args = typeof obj.arguments === 'string' ? JSON.parse(obj.arguments) : (obj.arguments || obj.parameters || obj.args || obj);
@@ -1189,7 +1224,7 @@ When user mentions a specific file (e.g., "edit TicTacToe.java", "fix Main.py"):
       }
       // Nested function: { function: { name: "...", arguments: { ... } } }
       if (obj.function?.name && toolNames.includes(obj.function.name)) {
-        let args = obj.function.arguments || {};
+        let args = obj.function.arguments || obj.function.parameters || {};
         if (typeof args === 'string') {
           try { args = JSON.parse(args); } catch { }
         }
@@ -1205,21 +1240,25 @@ When user mentions a specific file (e.g., "edit TicTacToe.java", "fix Main.py"):
       }
       // Bare argument structure — infer tool from argument shape
       // NOTE: Models use "path" OR "file_path" — check both
-      const fp = obj.file_path || obj.path || '';
-      if (fp && obj.content) {
-        results.push({ name: 'create_file', args: { ...obj, file_path: fp } });
+      const fp = obj.file_path || obj.path || obj.filename || '';
+      if (fp && (obj.content || obj.code || obj.text)) {
+        results.push({ name: 'create_file', args: { file_path: fp, content: obj.content || obj.code || obj.text } });
         return true;
       }
-      if (fp && (obj.find_text || obj.old_text) && (obj.replace_text || obj.new_text)) {
-        results.push({ name: 'find_and_replace', args: { ...obj, file_path: fp } });
+      if (fp && (obj.find_text || obj.old_text || obj.search) && (obj.replace_text || obj.new_text || obj.replacement)) {
+        results.push({ name: 'find_and_replace', args: {
+          file_path: fp,
+          find_text: obj.find_text || obj.old_text || obj.search,
+          replace_text: obj.replace_text || obj.new_text || obj.replacement
+        } });
         return true;
       }
-      if (fp && !obj.content && !obj.find_text && !obj.old_text) {
-        results.push({ name: 'read_file', args: { ...obj, file_path: fp } });
+      if (fp && !obj.content && !obj.code && !obj.find_text && !obj.old_text) {
+        results.push({ name: 'read_file', args: { file_path: fp } });
         return true;
       }
-      if (obj.dir_path) {
-        results.push({ name: 'list_files', args: obj });
+      if (obj.dir_path || obj.directory || obj.folder) {
+        results.push({ name: 'list_files', args: { dir_path: obj.dir_path || obj.directory || obj.folder } });
         return true;
       }
       return false;
@@ -1232,10 +1271,23 @@ When user mentions a specific file (e.g., "edit TicTacToe.java", "fix Main.py"):
     const codeBlockRegex = /```(?:json)?\s*([\s\S]*?)```/gi;
     let match;
     while ((match = codeBlockRegex.exec(cleanedText)) !== null) {
+      const jsonContent = match[1].trim();
       try {
-        const obj = JSON.parse(match[1]);
+        const obj = JSON.parse(jsonContent);
         if (processParsedObject(obj)) continue;
-      } catch { } // keep trying
+      } catch {
+        // Try fixing incomplete JSON inside code block
+        const closingSuffixes = ['}', '"}', '"}]', '}]}', '"}]}'];
+        for (const suffix of closingSuffixes) {
+          try {
+            const obj = JSON.parse(jsonContent + suffix);
+            if (processParsedObject(obj)) {
+              console.log(`[CodeNative AI] Strategy 1: Fixed incomplete JSON block with suffix "${suffix}"`);
+              break;
+            }
+          } catch { }
+        }
+      }
     }
 
     if (results.length > 0) return results;
@@ -1249,6 +1301,23 @@ When user mentions a specific file (e.g., "edit TicTacToe.java", "fix Main.py"):
         const obj = JSON.parse(possibleJson);
         processParsedObject(obj);
       } catch { }
+    }
+
+    if (results.length > 0) return results;
+
+    // Strategy 2.5: Try fixing incomplete JSON (model may have been cut off)
+    if (firstBrace !== -1) {
+      const incompleteJson = cleanedText.substring(firstBrace);
+      const closingSuffixes = ['}', '"}', '"}]', '}]}', '"}]}', '"}}', '"}}}'];
+      for (const suffix of closingSuffixes) {
+        try {
+          const obj = JSON.parse(incompleteJson + suffix);
+          if (processParsedObject(obj)) {
+            console.log(`[CodeNative AI] Strategy 2.5: Fixed incomplete JSON with suffix "${suffix}"`);
+            break;
+          }
+        } catch { }
+      }
     }
 
     if (results.length > 0) return results;
