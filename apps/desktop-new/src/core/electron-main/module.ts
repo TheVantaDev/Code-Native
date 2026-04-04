@@ -3,6 +3,7 @@ import { ElectronMainModule } from '@opensumi/ide-core-electron-main/lib/electro
 import { StorageContribution, StorageService } from './storage.service';
 import { ThemeContribution, ThemeService } from './theme.service';
 import { LifecycleContribution } from './lifecycle.contribution'
+import { BackendServerContribution } from './backend-server.contribution'
 import { IProduct, IEnvironmentService } from '../common'
 import { EnvironmentService } from './environment.service'
 import { WindowsManager } from './window/windows-manager'
@@ -16,6 +17,7 @@ export * from './storage.service'
 export class CoreElectronMainModule extends ElectronMainModule {
   providers = [
     LifecycleContribution,
+    BackendServerContribution,
     StorageContribution,
     StorageService,
     ThemeContribution,
