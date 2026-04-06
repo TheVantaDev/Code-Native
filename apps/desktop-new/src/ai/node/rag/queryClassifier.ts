@@ -60,6 +60,13 @@ const ACTION_KEYWORDS = [
   // Edit operations
   'edit file', 'edit the file', 'modify file', 'update file', 'change file',
   'fix the file', 'fix file', 'fix this file',
+  // Project / app creation
+  'create a project', 'make a project', 'build a project', 'new project',
+  'create an app', 'make an app', 'build an app', 'create a website',
+  'make a website', 'scaffold', 'create a todo', 'make a todo',
+  'create a calculator', 'make a calculator', 'create a game', 'make a game',
+  'in this folder', 'in this directory', 'in the folder', 'in the directory',
+  'this folder', 'current folder', 'selected folder',
   // General code actions
   'fix', 'debug', 'refactor', 'optimize', 'improve',
   'add to', 'update', 'modify', 'change', 'edit',
@@ -80,6 +87,13 @@ const FILE_ACTION_PATTERNS = [
   /\bcreate\s+[\w-]+\.(ts|tsx|js|jsx|py|java|go|rs|cpp|c|h|txt|json|html|css)\b/i,
   /\bmake\s+[\w-]+\.(ts|tsx|js|jsx|py|java|go|rs|cpp|c|h|txt|json|html|css)\b/i,
   /\bwrite\s+[\w-]+\.(ts|tsx|js|jsx|py|java|go|rs|cpp|c|h|txt|json|html|css)\b/i,
+  // Project/app creation — these MUST trigger the agent loop
+  /\b(make|build|create|scaffold|generate|setup|initialize|init)\s+(a\s+)?(new\s+)?(project|app|application|website|web\s*app|game|api|server|cli|tool|library|component|module|calculator|todo|chat|blog|dashboard)\b/i,
+  /\bin\s+(this|the|current|selected|that)\s+(folder|directory|dir|path)\b/i,
+  /\bscaffold\b/i,
+  /\bbootstrap\s+(a|the|this)?\s*(project|app|application)\b/i,
+  /\bset\s*up\s+(a|the|this)?\s*(project|app|application)\b/i,
+  /\bstart\s+(a|the|this)?\s*(new\s+)?(project|app|application)\b/i,
 ];
 
 // File/path patterns that indicate project reference

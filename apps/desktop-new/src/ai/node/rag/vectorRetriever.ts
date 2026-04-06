@@ -139,7 +139,8 @@ async function embed(text: string): Promise<number[] | null> {
 
 /**
  * (Re-)index all chunks from the current in-memory project index into
- * ChromaDB. Safe to call multiple times — existing data is cleared first.
+ * ChromaDB. Safe to call multiple times — skips if already indexed,
+ * clears and re-indexes if rootPath changed.
  *
  * Skips silently when ChromaDB or Ollama embeddings are unavailable.
  */
@@ -151,6 +152,23 @@ export async function indexChunksIntoChroma(): Promise<void> {
   if (!collection) {
     console.warn('⚠️  ChromaDB unavailable — vector index skipped, using BM25 only');
     return;
+  }
+
+  // Check if this workspace root is already indexed — skip re-embedding if so
+  try {
+    const existingCount = await collection.query({
+      queryEmbeddings: [[0]], // dummy query just to count
+      nResults: 1,
+      where: { rootPath: { $eq: index.rootPath } },
+    });
+    const hasExisting = existingCount.ids[0]?.length > 0;
+    if (hasExisting) {
+      console.log(`✅ Vector index: already indexed for ${index.rootPath}, skipping re-embedding`);
+      chromaAvailable = true;
+      return;
+    }
+  } catch {
+    // If query fails, proceed with fresh indexing
   }
 
   try {

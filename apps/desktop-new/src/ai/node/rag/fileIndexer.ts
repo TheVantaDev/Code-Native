@@ -270,7 +270,7 @@ function chunkByStructure(
 }
 
 /** Chunk a single file using structure-aware or sliding-window strategy */
-function chunkFile(content: string, filePath: string, relativePath: string): CodeChunk[] {
+export function chunkFile(content: string, filePath: string, relativePath: string): CodeChunk[] {
   const lines = content.split('\n');
   const ext = extname(filePath).toLowerCase();
   const language = LANGUAGE_MAP[ext] || 'text';

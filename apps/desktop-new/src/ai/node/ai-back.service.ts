@@ -22,6 +22,7 @@ import {
   computeDiff,
   DiffResult,
 } from './rag/diffService';
+import { startFileWatcher, stopFileWatcher } from './rag/fileWatcher';
 
 // Ollama API
 const OLLAMA_URL = 'http://127.0.0.1:11434';
@@ -699,6 +700,11 @@ export class AIBackService extends BaseAIBackService implements IAIBackService {
       const firstFiles = project.fileTree.split('\n').slice(0, 10).join('\n');
       console.log(`[CodeNative AI] File tree preview:\n${firstFiles}`);
 
+      // Start file watcher for incremental re-indexing
+      startFileWatcher(cleanDir, () => {
+        console.log(`[CodeNative AI] File changed — index updated`);
+      });
+
       // Build vector index in ChromaDB (optional, falls back to BM25-only if unavailable)
       indexChunksIntoChroma().catch(err =>
         console.warn('[CodeNative AI] Vector indexing failed (non-fatal):', err?.message ?? String(err)),
@@ -808,6 +814,15 @@ export class AIBackService extends BaseAIBackService implements IAIBackService {
     const isNoTool = (options as any).noTool === true;
     const config = this.modelConfig;
 
+    // ===== EXTRACT IDE CONTEXT from browser-side injection =====
+    const activeFile: { path: string; line?: number; column?: number; language?: string } | undefined
+      = (options as any).activeFile;
+    const openTabs: string[] | undefined = (options as any).openTabs;
+    const clientWorkspaceRoot: string | undefined = (options as any).workspaceRoot;
+
+    // Use client-provided workspace root as fallback if node-side isn't set
+    const effectiveWorkspaceRoot = this._workspaceRoot || clientWorkspaceRoot || '';
+
     // Clear dedup history for each new request
     clearToolCallHistory();
 
@@ -817,12 +832,41 @@ export class AIBackService extends BaseAIBackService implements IAIBackService {
 
       const messages: Array<{ role: string; content: string }> = [];
 
+      // ===== PARSE @MENTIONS: @filename.ts or @path/to/file =====
+      let atMentionContext = '';
+      const atMentionPattern = /@([\/\\\w\-\.]+\.\w+)/g;
+      let atMatch: RegExpExecArray | null;
+      const mentionedPaths = new Set<string>();
+      while ((atMatch = atMentionPattern.exec(input)) !== null) {
+        const mentioned = atMatch[1];
+        // Try absolute path first, then search workspace
+        let resolvedPath: string | null = null;
+        if (path.isAbsolute(mentioned) && fs.existsSync(mentioned)) {
+          resolvedPath = mentioned;
+        } else if (effectiveWorkspaceRoot) {
+          const joined = path.join(effectiveWorkspaceRoot, mentioned);
+          if (fs.existsSync(joined)) {
+            resolvedPath = joined;
+          } else {
+            // Search workspace for the filename
+            resolvedPath = findFileInWorkspace(effectiveWorkspaceRoot, path.basename(mentioned));
+          }
+        }
+        if (resolvedPath && !mentionedPaths.has(resolvedPath)) {
+          mentionedPaths.add(resolvedPath);
+          try {
+            const content = fs.readFileSync(resolvedPath, 'utf-8');
+            const truncated = content.length > 4000 ? content.substring(0, 4000) + '\n...(truncated)' : content;
+            atMentionContext += `\n<at_mention path="${resolvedPath}">\n${truncated}\n</at_mention>`;
+          } catch { }
+        }
+      }
+
       // ===== SMART CONTEXT: Enhance query with context understanding =====
-      const smartContext = this._workspaceRoot
-        ? enhanceQueryWithContext(input, this._workspaceRoot)
+      const smartContext = effectiveWorkspaceRoot
+        ? enhanceQueryWithContext(input, effectiveWorkspaceRoot)
         : { enhancedQuery: input, systemNote: '', resolvedFile: null };
 
-      // Log smart context for debugging
       if (smartContext.systemNote) {
         console.log(`[CodeNative AI] SmartContext: ${smartContext.systemNote}`);
       }
@@ -841,18 +885,43 @@ export class AIBackService extends BaseAIBackService implements IAIBackService {
           })
         : null;
 
-      // Log RAG classification for debugging
       if (ragResult) {
         console.log(`[CodeNative AI] RAG: intent=${ragResult.classification.intent}, confidence=${ragResult.classification.confidence.toFixed(2)}, retrieval=${ragResult.retrievalMethod}, chunks=${ragResult.rawResults.length}`);
       }
 
       // ===== SYSTEM PROMPT =====
-      const workspaceInfo = this._workspaceRoot ? `\nWorkspace: ${this._workspaceRoot}` : '';
+      const workspaceInfo = effectiveWorkspaceRoot ? `\nWorkspace: ${effectiveWorkspaceRoot}` : '';
       const currentIndex = getIndex();
       const queryIntent = ragResult?.classification.intent || 'general';
 
-      // Build system prompt: combine RAG-generated prompt with tool instructions
-      // Skip tool instructions for general knowledge questions - they don't need file operations
+      // ── Active editor section ──
+      let activeEditorSection = '';
+      if (activeFile?.path) {
+        const lineInfo = activeFile.line ? ` (line ${activeFile.line})` : '';
+        const langInfo = activeFile.language ? `, language: ${activeFile.language}` : '';
+        activeEditorSection = `\n\n## ACTIVE EDITOR\nFile: ${activeFile.path}${lineInfo}${langInfo}\n`;
+        activeEditorSection += `When user says "this file", "the current file", "it", or refers to line numbers without specifying a file → use: ${activeFile.path}`;
+
+        // Auto-inject first 80 lines of active file for code_action/project intents
+        if ((queryIntent === 'code_action' || queryIntent === 'project' || queryIntent === 'hybrid') && !mentionedPaths.has(activeFile.path)) {
+          try {
+            if (fs.existsSync(activeFile.path)) {
+              const content = fs.readFileSync(activeFile.path, 'utf-8');
+              const lines = content.split('\n').slice(0, 80).join('\n');
+              activeEditorSection += `\n\n<active_file>\n${lines}\n${content.split('\n').length > 80 ? '...(truncated)' : ''}\n</active_file>`;
+            }
+          } catch { }
+        }
+      }
+
+      // ── Open tabs section ──
+      let openTabsSection = '';
+      if (openTabs && openTabs.length > 0) {
+        openTabsSection = `\n\n## OPEN EDITOR TABS\n${openTabs.map(t => `- ${t}`).join('\n')}`;
+        openTabsSection += `\nThese files are currently open. Prioritize them when the user says "the open files" or similar.`;
+      }
+
+      // ── Tool instructions ──
       const ragSystemPrompt = ragResult?.systemPrompt || '';
       const toolInstructions = (isNoTool || queryIntent === 'general') ? '' : `
 
@@ -870,6 +939,14 @@ export class AIBackService extends BaseAIBackService implements IAIBackService {
 3. **find_and_replace** - Small surgical edits only
 4. **list_files** - Discover project structure
 5. **search_code** - Search for patterns, function definitions, imports across the codebase
+6. **create_project** - Create MULTIPLE files at once for a new project/app scaffold
+
+### CREATING A PROJECT / APP:
+When user asks to "make a todo app", "create a project", "scaffold a website", etc.:
+- Use **create_project** with project_dir set to the target directory
+- Create ALL necessary files in one call (index.html, styles.css, main.js, README.md, etc.)
+- Target directory: ${effectiveWorkspaceRoot || '(ask user for path)'}
+- If user says "in this folder" or "here" → use: ${effectiveWorkspaceRoot || '(workspace root)'}
 
 ### CRITICAL FILE TARGETING RULE:
 When user mentions a specific file (e.g., "edit TicTacToe.java", "fix Main.py"):
@@ -885,9 +962,9 @@ When user mentions a specific file (e.g., "edit TicTacToe.java", "fix Main.py"):
 3. **Small fix** (single line/variable): read_file → find_and_replace
 
 ### PATHS:
-- Workspace: ${this._workspaceRoot || 'not set'}
-- Always use absolute paths: ${this._workspaceRoot}/filename.ext
-- If user says "TicTacToe.java", path is: ${this._workspaceRoot}/TicTacToe.java
+- Workspace: ${effectiveWorkspaceRoot || 'not set'}
+- Always use absolute paths: ${effectiveWorkspaceRoot}/filename.ext
+- If user says "TicTacToe.java", path is: ${effectiveWorkspaceRoot}/TicTacToe.java
 
 ### OUTPUT FORMAT:
 - Write one sentence explaining what you will do
@@ -900,27 +977,26 @@ When user mentions a specific file (e.g., "edit TicTacToe.java", "fix Main.py"):
         ? `\n\nProject structure:\n${currentIndex.fileTree.split('\n').slice(0, 40).join('\n')}${currentIndex.fileTree.split('\n').length > 40 ? '\n...(truncated)' : ''}`
         : '';
 
-      // Add smart context hints (resolved file references, recent files)
       const smartContextHint = smartContext.systemNote
         ? `\n\n## CONTEXT FROM CONVERSATION:\n${smartContext.systemNote}`
         : '';
 
       const systemPrompt = ragSystemPrompt
-        ? `${ragSystemPrompt}${workspaceInfo}${toolInstructions}${smartContextHint}${fileTreeSnippet}`
-        : `You are CodeNative AI, an expert coding assistant.${workspaceInfo}${toolInstructions}${smartContextHint}${fileTreeSnippet}`;
+        ? `${ragSystemPrompt}${workspaceInfo}${activeEditorSection}${openTabsSection}${toolInstructions}${smartContextHint}${fileTreeSnippet}`
+        : `You are CodeNative AI, an expert coding assistant.${workspaceInfo}${activeEditorSection}${openTabsSection}${toolInstructions}${smartContextHint}${fileTreeSnippet}`;
 
       messages.push({ role: 'system', content: systemPrompt });
 
-      // ===== CONVERSATION HISTORY =====
-      const history = options.history?.slice(-10) || [];
+      // ===== CONVERSATION HISTORY (increased to 20 messages) =====
+      const history = options.history?.slice(-20) || [];
 
       // Tool-use priming: show the model how to use tools correctly
       const needsToolPriming = queryIntent === 'code_action' || queryIntent === 'project';
-      if (!isNoTool && needsToolPriming && history.length === 0 && this._workspaceRoot) {
-        // Example 1: Create a new file
+      if (!isNoTool && needsToolPriming && history.length === 0 && effectiveWorkspaceRoot) {
+        // Example: Create a new file
         messages.push({
           role: 'user',
-          content: `Create a file called greet.py in ${this._workspaceRoot} with a function that prints "Hello"`,
+          content: `Create a file called greet.py in ${effectiveWorkspaceRoot} with a function that prints "Hello"`,
         });
         messages.push({
           role: 'assistant',
@@ -928,7 +1004,7 @@ When user mentions a specific file (e.g., "edit TicTacToe.java", "fix Main.py"):
         });
         messages.push({
           role: 'tool',
-          content: `[Done: wrote ${this._workspaceRoot}/greet.py (4 lines)]`,
+          content: `[Done: wrote ${effectiveWorkspaceRoot}/greet.py (4 lines)]`,
         });
         messages.push({
           role: 'assistant',
@@ -945,35 +1021,36 @@ When user mentions a specific file (e.g., "edit TicTacToe.java", "fix Main.py"):
 
       // ===== BUILD USER MESSAGE =====
       let enrichedInput = input;
-      let explicitFileContext = '';
+      let explicitFileContext = atMentionContext; // Start with @mention files
 
       // 1. Auto-detect absolute file paths mentioned in the prompt (explicit mentions)
       const filePathMatches = input.match(/[A-Za-z]:[\\/][\w\\/.\-]+\.\w+/g);
       if (filePathMatches) {
         for (const rawPath of filePathMatches) {
           const cleanPath = cleanFilePath(rawPath);
-          if (fs.existsSync(cleanPath)) {
+          if (fs.existsSync(cleanPath) && !mentionedPaths.has(cleanPath)) {
             try {
               const fileContent = fs.readFileSync(cleanPath, 'utf-8');
               const truncated = fileContent.length > 3000
                 ? fileContent.substring(0, 3000) + '\n...(truncated)'
                 : fileContent;
               explicitFileContext += `\n<explicit_file path="${cleanPath}">\n${truncated}\n</explicit_file>`;
+              mentionedPaths.add(cleanPath);
             } catch { }
           }
         }
       }
 
       // 2. Search for bare filenames in the workspace (e.g. "Solution.java")
-      if (this._workspaceRoot) {
+      if (effectiveWorkspaceRoot) {
         const bareFileMatches = input.match(/\b([A-Za-z0-9_\-]+\.[a-zA-Z]{1,10})\b/g);
         if (bareFileMatches) {
           for (const bareName of bareFileMatches) {
             if (/^(llama|deepseek|mistral|qwen|gemma)/i.test(bareName)) continue;
             if (filePathMatches?.some(p => p.toLowerCase().includes(bareName.toLowerCase()))) continue;
 
-            const foundPath = findFileInWorkspace(this._workspaceRoot, bareName);
-            if (foundPath && !explicitFileContext.includes(foundPath)) {
+            const foundPath = findFileInWorkspace(effectiveWorkspaceRoot, bareName);
+            if (foundPath && !explicitFileContext.includes(foundPath) && !mentionedPaths.has(foundPath)) {
               try {
                 const fileContent = fs.readFileSync(foundPath, 'utf-8');
                 const truncated = fileContent.length > 3000
@@ -986,15 +1063,31 @@ When user mentions a specific file (e.g., "edit TicTacToe.java", "fix Main.py"):
         }
       }
 
-      // 3. Combine: explicit files + RAG context (only if RAG decided to retrieve)
+      // 3. Inject open tabs content for code_action/project intents (first 40 lines each, max 3 tabs)
+      if (openTabs && openTabs.length > 0 && (queryIntent === 'code_action' || queryIntent === 'project')) {
+        let tabsInjected = 0;
+        for (const tabPath of openTabs.slice(0, 5)) {
+          if (tabsInjected >= 3) break;
+          if (mentionedPaths.has(tabPath)) continue;
+          if (activeFile?.path && tabPath === activeFile.path) continue; // Already in activeEditorSection
+          try {
+            if (fs.existsSync(tabPath)) {
+              const content = fs.readFileSync(tabPath, 'utf-8');
+              const lines = content.split('\n').slice(0, 40).join('\n');
+              explicitFileContext += `\n<open_tab path="${tabPath}">\n${lines}\n${content.split('\n').length > 40 ? '...(truncated)' : ''}\n</open_tab>`;
+              tabsInjected++;
+            }
+          } catch { }
+        }
+      }
+
+      // 4. Combine: explicit files + RAG context (only if RAG decided to retrieve)
       const ragContext = ragResult?.context.text || '';
 
       if (explicitFileContext || ragContext) {
-        // Only inject RAG context if classification says we should
         if (ragResult?.classification.shouldRetrieve && ragContext) {
           enrichedInput = `${ragContext}\n\n${explicitFileContext}\n\n<user_query>\n${input}\n</user_query>`;
         } else if (explicitFileContext) {
-          // Just explicit file mentions, no RAG
           enrichedInput = `${explicitFileContext}\n\n<user_query>\n${input}\n</user_query>`;
         }
       }

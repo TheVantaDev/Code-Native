@@ -9,6 +9,7 @@ import {
   CancellationToken,
   ChatResponse,
   ECodeEditsSourceTyping,
+  IMarker,
 } from '@opensumi/ide-core-common';
 import { ClientAppContribution, Domain, getIcon } from '@opensumi/ide-core-browser';
 import { ComponentContribution, ComponentRegistry } from '@opensumi/ide-core-browser/lib/layout';
@@ -20,6 +21,8 @@ import { ChatService } from '@opensumi/ide-ai-native/lib/browser/chat/chat.api.s
 import { InlineChatController } from '@opensumi/ide-ai-native/lib/browser/widget/inline-chat/inline-chat-controller';
 import { ITerminalCommandSuggestionDesc } from '@opensumi/ide-ai-native/lib/common';
 import { listenReadable } from '@opensumi/ide-utils/lib/stream';
+import { WorkbenchEditorService } from '@opensumi/ide-editor/lib/common';
+import { IWorkspaceService } from '@opensumi/ide-workspace';
 
 import { AI_MENU_BAR_LEFT_ACTION, EInlineOperation } from './constants'
 import { LeftToolbar } from './components/left-toolbar'
@@ -31,8 +34,8 @@ import { AICommandService } from './command/command.service'
 import hiPng from './assets/hi.png'
 import { ILinterErrorData } from '@opensumi/ide-ai-native/lib/browser/contrib/intelligent-completions/source/lint-error.source';
 
-@Domain(ComponentContribution, AINativeCoreContribution)
-export class AINativeContribution implements ComponentContribution, AINativeCoreContribution {
+@Domain(ComponentContribution, AINativeCoreContribution, ClientAppContribution)
+export class AINativeContribution implements ComponentContribution, AINativeCoreContribution, ClientAppContribution {
   @Autowired(MessageService)
   protected readonly messageService: MessageService;
 
@@ -51,7 +54,85 @@ export class AINativeContribution implements ComponentContribution, AINativeCore
   @Autowired(AICommandService)
   aiCommandService: AICommandService;
 
+  @Autowired(WorkbenchEditorService)
+  private editorService: WorkbenchEditorService;
+
+  @Autowired(IWorkspaceService)
+  private readonly workspaceService: IWorkspaceService;
+
   logger = getDebugLogger();
+
+  /**
+   * Collect rich IDE context to inject into every AI request.
+   * This gives the AI awareness of:
+   *   - What file is active + cursor line
+   *   - What files are open as tabs
+   *   - The workspace root (for "make a project here" commands)
+   *   - Current TypeScript/lint errors (for fix/debug requests)
+   */
+  private collectIDEContext(): Record<string, any> {
+    const ctx: Record<string, any> = {};
+
+    try {
+      // 1. Active editor file + cursor
+      const currentEditor = this.editorService.currentEditor;
+      const currentResource = this.editorService.currentResource;
+      if (currentResource?.uri) {
+        const uri = currentResource.uri;
+        // Convert file:///C:/... URI to a plain path string
+        const uriStr = uri.toString();
+        const filePath = uriStr.startsWith('file:///')
+          ? decodeURIComponent(uriStr.replace(/^file:\/\/\//, '').replace(/\//g, '\\'))
+          : uriStr;
+        ctx.activeFile = { path: filePath, language: (currentResource as any).name?.split('.').pop() || '' };
+
+        // Cursor position from the code editor
+        if (currentEditor) {
+          const monacoEditor = (currentEditor as any).monacoEditor;
+          if (monacoEditor) {
+            const pos = monacoEditor.getPosition();
+            if (pos) {
+              ctx.activeFile.line = pos.lineNumber;
+              ctx.activeFile.column = pos.column;
+            }
+          }
+        }
+      }
+    } catch (e) {
+      // Non-fatal: editor context is best-effort
+    }
+
+    try {
+      // 2. Open editor tabs (all URIs from all groups)
+      const allUris = this.editorService.getAllOpenedUris?.() ?? [];
+      const tabs: string[] = [];
+      for (const uri of allUris.slice(0, 8)) {
+        const uriStr = uri.toString();
+        if (uriStr.startsWith('file:///')) {
+          const p = decodeURIComponent(uriStr.replace(/^file:\/\/\//, '').replace(/\//g, '\\'));
+          tabs.push(p);
+        }
+      }
+      if (tabs.length > 0) ctx.openTabs = tabs;
+    } catch (e) {
+      // Non-fatal
+    }
+
+    try {
+      // 3. Workspace root (for "create project in this folder")
+      const rootUri = this.workspaceService.getWorkspaceRootUri(undefined);
+      if (rootUri) {
+        const uriStr = rootUri.toString();
+        ctx.workspaceRoot = uriStr.startsWith('file:///')
+          ? decodeURIComponent(uriStr.replace(/^file:\/\/\//, '').replace(/\//g, '\\'))
+          : uriStr;
+      }
+    } catch (e) {
+      // Non-fatal
+    }
+
+    return ctx;
+  }
 
   registerComponent(registry: ComponentRegistry): void {
     registry.register(AI_MENU_BAR_LEFT_ACTION, {
@@ -70,8 +151,37 @@ export class AINativeContribution implements ComponentContribution, AINativeCore
           title: 'Explain this repository',
           message: 'Give me an overview of the current repository',
         },
+        {
+          icon: getIcon('code'),
+          title: 'Create a project here',
+          message: 'Create a simple todo app in the current workspace',
+        },
       ],
     );
+  }
+
+  /**
+   * Wrap aiBackService.requestStream to always inject IDE context.
+   * Called once on app start — after this, every AI chat request
+   * automatically carries activeFile, openTabs, and workspaceRoot.
+   */
+  onDidStart(): void {
+    const originalRequestStream = this.aiBackService.requestStream.bind(this.aiBackService);
+    const self = this;
+
+    (this.aiBackService as any).requestStream = function (
+      input: string,
+      options: any,
+      cancelToken?: any,
+    ) {
+      // Inject live IDE context into every request
+      const ideCtx = self.collectIDEContext();
+      const enrichedOptions = {
+        ...options,
+        ...ideCtx,
+      };
+      return originalRequestStream(input, enrichedOptions, cancelToken);
+    };
   }
 
   registerInlineChatFeature(registry: IInlineChatFeatureRegistry) {
