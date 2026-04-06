@@ -25,26 +25,28 @@ const Section: React.FC<SectionProps> = ({ title, children, defaultExpanded = tr
 
     return (
         <div className="flex flex-col">
-            <div
-                id={headerId}
-                role="button"
-                aria-expanded={isExpanded}
-                aria-controls={sectionId}
-                tabIndex={0}
-                className="sidebar-section-header"
-                onClick={() => setIsExpanded(!isExpanded)}
-                onKeyDown={handleKeyDown}
-            >
-                <span
-                    className="sidebar-section-icon"
-                    style={{
-                        transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',
-                    }}
+            <h3 style={{ margin: 0, padding: 0, fontSize: 'inherit', fontWeight: 'inherit' }}>
+                <div
+                    id={headerId}
+                    role="button"
+                    aria-expanded={isExpanded}
+                    aria-controls={sectionId}
+                    tabIndex={0}
+                    className="sidebar-section-header"
+                    onClick={() => setIsExpanded(!isExpanded)}
+                    onKeyDown={handleKeyDown}
                 >
-                    <ChevronDown size={14} strokeWidth={2} />
-                </span>
-                <span className="truncate">{title}</span>
-            </div>
+                    <span
+                        className="sidebar-section-icon"
+                        style={{
+                            transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',
+                        }}
+                    >
+                        <ChevronDown size={14} strokeWidth={2} />
+                    </span>
+                    <span className="truncate">{title}</span>
+                </div>
+            </h3>
             <div
                 id={sectionId}
                 role="region"

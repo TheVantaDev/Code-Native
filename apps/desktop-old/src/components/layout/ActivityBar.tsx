@@ -36,7 +36,7 @@ const ActivityItem: React.FC<ActivityItemProps> = ({
                 role="tab"
                 aria-label={label}
                 aria-selected={isActive}
-                tabIndex={0}
+                tabIndex={isActive ? 0 : -1}
                 onClick={onClick}
                 onKeyDown={handleKeyDown}
                 onMouseEnter={() => setIsHovered(true)}
