@@ -23,13 +23,22 @@ const ActivityItem: React.FC<ActivityItemProps> = ({
 }) => {
     const [isHovered, setIsHovered] = useState(false);
 
+    const handleKeyDown = (e: React.KeyboardEvent) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onClick();
+        }
+    };
+
     return (
         <div className="tooltip-wrapper">
             <div
                 role="tab"
                 aria-label={label}
                 aria-selected={isActive}
+                tabIndex={0}
                 onClick={onClick}
+                onKeyDown={handleKeyDown}
                 onMouseEnter={() => setIsHovered(true)}
                 onMouseLeave={() => setIsHovered(false)}
                 className={`activity-item ${isActive ? 'active' : ''} ${glowing ? 'animate-glow' : ''}`}
@@ -66,7 +75,7 @@ export const ActivityBar: React.FC = () => {
     return (
         <div className="activity-bar">
             {/* Top Icons */}
-            <div className="flex flex-col">
+            <div className="flex flex-col" role="tablist" aria-label="Primary actions">
                 <ActivityItem
                     icon={<Files size={22} strokeWidth={1.5} />}
                     isActive={sidebarView === 'files'}
@@ -104,7 +113,7 @@ export const ActivityBar: React.FC = () => {
             <div className="flex-1" />
 
             {/* Bottom Icons */}
-            <div className="flex flex-col pb-2">
+            <div className="flex flex-col pb-2" role="tablist" aria-label="Secondary actions">
                 <ActivityItem
                     icon={
                         <Sparkles

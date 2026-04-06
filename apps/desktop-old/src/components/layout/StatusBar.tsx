@@ -9,19 +9,37 @@ const StatusItem: React.FC<{
     className?: string;
     title?: string;
     highlight?: boolean;
-}> = ({ children, onClick, className, title, highlight }) => (
-    <div
-        onClick={onClick}
-        className={`status-bar-item ${className || ''} ${onClick ? 'cursor-pointer' : ''}`}
-        style={{
-            color: highlight ? '#1a1b26' : undefined,
-            backgroundColor: highlight ? '#7aa2f7' : undefined,
-        }}
-        title={title}
-    >
-        {children}
-    </div>
-);
+}> = ({ children, onClick, className, title, highlight }) => {
+    const sharedStyle = {
+        color: highlight ? '#1a1b26' : undefined,
+        backgroundColor: highlight ? '#7aa2f7' : undefined,
+    };
+    const sharedClass = `status-bar-item ${className || ''} ${onClick ? 'cursor-pointer' : ''}`;
+
+    if (onClick) {
+        return (
+            <button
+                onClick={onClick}
+                className={sharedClass}
+                style={sharedStyle}
+                aria-label={title}
+                title={title}
+            >
+                {children}
+            </button>
+        );
+    }
+
+    return (
+        <div
+            className={sharedClass}
+            style={sharedStyle}
+            title={title}
+        >
+            {children}
+        </div>
+    );
+};
 
 // Separator
 const Sep = () => (

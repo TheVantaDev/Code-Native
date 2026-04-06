@@ -14,7 +14,7 @@ export const EditorArea: React.FC = () => {
             style={{ backgroundColor: 'var(--vscode-editor-bg)' }}>
             {/* Tab Header Area */}
             {openFiles.length > 0 ? (
-                <div className="editor-group-header">
+                <div className="editor-group-header" role="tablist" aria-label="Open editors">
                     {openFiles.map((file) => (
                         <EditorTab
                             key={file.id}
@@ -31,11 +31,11 @@ export const EditorArea: React.FC = () => {
 
             {/* Breadcrumbs */}
             {activeFile && (
-                <div className="breadcrumb">
+                <nav className="breadcrumb" aria-label="File path">
                     <span className="breadcrumb-item" style={{ color: '#565f89' }}>src</span>
                     <ChevronRight size={12} style={{ color: '#3b4261', margin: '0 4px' }} />
                     <span className="breadcrumb-item" style={{ color: '#a9b1d6' }}>{activeFile.name}</span>
-                </div>
+                </nav>
             )}
 
             {/* Editor Content or Welcome */}
