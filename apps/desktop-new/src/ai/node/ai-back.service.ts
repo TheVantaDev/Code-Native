@@ -5,6 +5,8 @@ import { BaseAIBackService, ChatReadableStream } from '@opensumi/ide-core-node/l
 import { ILogServiceManager } from '@opensumi/ide-logs';
 
 import { AIModelService } from './model.service'
+import { isIndexed, indexProject } from './rag/fileIndexer';
+import { buildSystemPrompt } from './rag/promptBuilder';
 
 // Talk directly to Ollama — no Express backend dependency
 const OLLAMA_URL = 'http://127.0.0.1:11434';
@@ -87,12 +89,24 @@ export class AIBackService extends BaseAIBackService implements IAIBackService {
       const controller = new AbortController();
       cancelToken?.onCancellationRequested(() => controller.abort());
 
+      let fullPrompt = input;
+      if (!isIndexed()) {
+          try {
+              await indexProject(process.cwd());
+          } catch(e) {}
+      }
+
+      if (isIndexed()) {
+        const sysPrompt = await buildSystemPrompt({ query: input });
+        fullPrompt = `${sysPrompt}\n\n${fullPrompt}`;
+      }
+
       const response = await fetch(`${OLLAMA_URL}/api/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model: this.modelName,
-          prompt: input,
+          prompt: fullPrompt,
           stream: false,
         }),
         signal: controller.signal,
@@ -136,9 +150,20 @@ export class AIBackService extends BaseAIBackService implements IAIBackService {
         .map(msg => `${String(msg.role) === 'ai' ? 'Assistant' : 'User'}: ${msg.content}`)
         .join('\n\n');
 
-      const fullPrompt = conversationContext
+      let fullPrompt = conversationContext
         ? `${conversationContext}\n\nUser: ${input}`
         : input;
+
+      if (!isIndexed()) {
+          try {
+              await indexProject(process.cwd());
+          } catch(e) {}
+      }
+
+      if (isIndexed()) {
+        const sysPrompt = await buildSystemPrompt({ query: input });
+        fullPrompt = `${sysPrompt}\n\n${fullPrompt}`;
+      }
 
       const controller = new AbortController();
       cancelToken?.onCancellationRequested(() => controller.abort());
