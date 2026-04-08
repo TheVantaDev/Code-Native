@@ -191,6 +191,7 @@ async function renderApp() {
       capabilities: {
         supportsMCP: false,
         supportsCustomLLMSettings: true,
+        supportsInlineCompletion: true,
       }
     },
   }

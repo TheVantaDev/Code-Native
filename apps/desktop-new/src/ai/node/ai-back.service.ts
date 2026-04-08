@@ -5,7 +5,6 @@ import { BaseAIBackService, ChatReadableStream } from '@opensumi/ide-core-node/l
 import { ILogServiceManager } from '@opensumi/ide-logs';
 import * as fs from 'fs';
 import * as path from 'path';
-
 import { IModelConfig } from '../common'
 import { indexProject, getIndex } from './rag/fileIndexer';
 import { indexChunksIntoChroma, resetVectorIndex } from './rag/vectorRetriever';
@@ -28,7 +27,6 @@ import { startFileWatcher, stopFileWatcher } from './rag/fileWatcher';
 const OLLAMA_URL = 'http://127.0.0.1:11434';
 const DEFAULT_MODEL = 'qwen2.5-coder:7b';
 const OLLAMA_HEALTH_TIMEOUT_MS = 5000;
-
 // ======================== HELPER UTILITIES ========================
 
 /** Decode common HTML entities that models sometimes produce */
@@ -75,7 +73,7 @@ When to use:
         type: 'object',
         properties: {
           file_path: { type: 'string', description: 'Absolute OS file path. MUST match the file user mentioned.' },
-          content:   { type: 'string', description: 'Complete file content to write' },
+          content: { type: 'string', description: 'Complete file content to write' },
         },
         required: ['file_path', 'content'],
       },
@@ -117,8 +115,8 @@ When to use:
       parameters: {
         type: 'object',
         properties: {
-          file_path:    { type: 'string', description: 'Absolute OS file path' },
-          find_text:    { type: 'string', description: 'Exact current text to find (copy from read_file output)' },
+          file_path: { type: 'string', description: 'Absolute OS file path' },
+          find_text: { type: 'string', description: 'Exact current text to find (copy from read_file output)' },
           replace_text: { type: 'string', description: 'New text to replace it with' },
         },
         required: ['file_path', 'find_text', 'replace_text'],
@@ -133,7 +131,7 @@ When to use:
       parameters: {
         type: 'object',
         properties: {
-          dir_path:  { type: 'string', description: 'Absolute OS directory path' },
+          dir_path: { type: 'string', description: 'Absolute OS directory path' },
           recursive: { type: 'boolean', description: 'List recursively (max 3 levels). Default false.' },
         },
         required: ['dir_path'],
@@ -529,7 +527,7 @@ function executeToolCall(rawName: string, args: Record<string, any>): ToolExecut
           const suffix = parts[1]?.replace(/\//g, path.sep) || '';
           const relativePath = path.relative(searchRoot, filePath);
           return relativePath.startsWith(prefix.replace(/\/$/, '')) &&
-                 (suffix ? relativePath.endsWith(suffix.replace(/^\/?\*/, '')) : true);
+            (suffix ? relativePath.endsWith(suffix.replace(/^\/?\*/, '')) : true);
         }
         return fileName.includes(filePattern) || filePath.includes(filePattern);
       };
@@ -875,14 +873,14 @@ export class AIBackService extends BaseAIBackService implements IAIBackService {
       const ragStatus = getRAGStatus();
       const ragResult = this._indexBuilt
         ? await runRAGPipeline(input, {
-            topK: 8,
-            maxTokens: 4000,
-            includeFileTree: false,
-            conversationHistory: (options.history || []).map(msg => ({
-              role: String(msg.role) === 'ai' ? 'assistant' : 'user',
-              content: String(msg.content),
-            })),
-          })
+          topK: 8,
+          maxTokens: 4000,
+          includeFileTree: false,
+          conversationHistory: (options.history || []).map(msg => ({
+            role: String(msg.role) === 'ai' ? 'assistant' : 'user',
+            content: String(msg.content),
+          })),
+        })
         : null;
 
       if (ragResult) {
@@ -925,53 +923,32 @@ export class AIBackService extends BaseAIBackService implements IAIBackService {
       const ragSystemPrompt = ragResult?.systemPrompt || '';
       const toolInstructions = (isNoTool || queryIntent === 'general') ? '' : `
 
-## FILE OPERATIONS - AIDER-STYLE RULES
+## FILE OPERATIONS
 
-### ⚠️ CRITICAL OUTPUT RULES:
-- NEVER output raw JSON objects like {"thoughts":..., "response":...} or {"name":..., "arguments":...}
-- NEVER output explanation text wrapped in JSON
-- ONLY use structured tool_calls to execute tools
-- If you want to explain something, write plain text THEN call the tool
+You have access to these tools. Use them via the structured tool_call API — NEVER output raw JSON.
 
-### TOOLS AVAILABLE:
-1. **create_file** - Create new file OR completely overwrite existing file with full content
-2. **read_file** - Read file contents (ALWAYS call this before editing)
-3. **find_and_replace** - Small surgical edits only
-4. **list_files** - Discover project structure
-5. **search_code** - Search for patterns, function definitions, imports across the codebase
-6. **create_project** - Create MULTIPLE files at once for a new project/app scaffold
+### AVAILABLE TOOLS:
+| Tool | When to use |
+|------|-------------|
+| create_file | Create a new file OR replace an entire file's content |
+| read_file | Read a file before editing (ALWAYS do this first) |
+| find_and_replace | Surgical/small edits only (single change per call) |
+| list_files | Discover directory structure |
+| search_code | Find function definitions, usages, patterns in codebase |
+| create_project | Scaffold multiple files at once for a new project |
 
-### CREATING A PROJECT / APP:
-When user asks to "make a todo app", "create a project", "scaffold a website", etc.:
-- Use **create_project** with project_dir set to the target directory
-- Create ALL necessary files in one call (index.html, styles.css, main.js, README.md, etc.)
-- Target directory: ${effectiveWorkspaceRoot || '(ask user for path)'}
-- If user says "in this folder" or "here" → use: ${effectiveWorkspaceRoot || '(workspace root)'}
+### RULES:
+1. **Read before editing** — Always call read_file before find_and_replace or create_file on existing files.
+2. **Exact filenames** — If user says "edit Foo.java", target Foo.java exactly, not FooHelper.java.
+3. **Absolute paths** — Always use full absolute paths. Workspace root: \`${effectiveWorkspaceRoot || '(not set)'}\`
+4. **Large rewrites** — Use create_file with full updated content instead of many find_and_replace calls.
+5. **No raw JSON** — Do NOT output {"name":..., "arguments":...} blocks. Use tool_calls only.
+6. **No code blocks** — Do NOT output \`\`\`code\`\`\` blocks inline. The tool writes the file for you.
 
-### CRITICAL FILE TARGETING RULE:
-When user mentions a specific file (e.g., "edit TicTacToe.java", "fix Main.py"):
-- Use THAT EXACT filename - do NOT create a different file
-- Example: "edit TicTacToe.java" → edit TicTacToe.java, NOT TicTacToeGame.java
-
-### WORKFLOW:
-1. **New file**: call create_file with new path and COMPLETE file content
-2. **Edit existing file** (e.g. "change all code to merge sort"):
-   - Step 1: call read_file to see current content
-   - Step 2: call create_file to OVERWRITE with the new complete content
-   - Do NOT use find_and_replace for large rewrites
-3. **Small fix** (single line/variable): read_file → find_and_replace
-
-### PATHS:
-- Workspace: ${effectiveWorkspaceRoot || 'not set'}
-- Always use absolute paths: ${effectiveWorkspaceRoot}/filename.ext
-- If user says "TicTacToe.java", path is: ${effectiveWorkspaceRoot}/TicTacToe.java
-
-### OUTPUT FORMAT:
-- Write one sentence explaining what you will do
-- Call the tool (system executes automatically)
-- Write a short confirmation after (1-2 sentences)
-- NEVER output code blocks manually - the tool writes the file for you
-- NEVER output JSON with "thoughts" or "response" keys`;
+### RESPONSE FORMAT:
+- Brief 1-sentence plan → call tool → 1-sentence confirmation.
+- If the user asks a question, answer it directly WITHOUT calling tools.
+- If the user asks to create/edit/read a file, use the tool — do not describe the code.`;
 
       const fileTreeSnippet = queryIntent !== 'general' && currentIndex?.fileTree
         ? `\n\nProject structure:\n${currentIndex.fileTree.split('\n').slice(0, 40).join('\n')}${currentIndex.fileTree.split('\n').length > 40 ? '\n...(truncated)' : ''}`
@@ -981,42 +958,36 @@ When user mentions a specific file (e.g., "edit TicTacToe.java", "fix Main.py"):
         ? `\n\n## CONTEXT FROM CONVERSATION:\n${smartContext.systemNote}`
         : '';
 
-      const systemPrompt = ragSystemPrompt
-        ? `${ragSystemPrompt}${workspaceInfo}${activeEditorSection}${openTabsSection}${toolInstructions}${smartContextHint}${fileTreeSnippet}`
-        : `You are CodeNative AI, an expert coding assistant.${workspaceInfo}${activeEditorSection}${openTabsSection}${toolInstructions}${smartContextHint}${fileTreeSnippet}`;
+      // Build a clean, layered system prompt
+      const baseIdentity = ragSystemPrompt
+        ? `${ragSystemPrompt}`
+        : [
+            `You are CodeNative AI, an expert software engineering assistant embedded inside CodeNative IDE.`,
+            `Your job is to understand exactly what the user is asking and respond clearly, accurately, and concisely.`,
+            `When you answer questions, be direct and precise. When you operate on files, use tools — never describe code without writing it.`,
+          ].join(' ');
+
+      const systemPrompt = [
+        baseIdentity,
+        workspaceInfo,
+        activeEditorSection,
+        openTabsSection,
+        toolInstructions,
+        smartContextHint,
+        fileTreeSnippet,
+      ].filter(Boolean).join('');
 
       messages.push({ role: 'system', content: systemPrompt });
 
-      // ===== CONVERSATION HISTORY (increased to 20 messages) =====
-      const history = options.history?.slice(-20) || [];
-
-      // Tool-use priming: show the model how to use tools correctly
-      const needsToolPriming = queryIntent === 'code_action' || queryIntent === 'project';
-      if (!isNoTool && needsToolPriming && history.length === 0 && effectiveWorkspaceRoot) {
-        // Example: Create a new file
-        messages.push({
-          role: 'user',
-          content: `Create a file called greet.py in ${effectiveWorkspaceRoot} with a function that prints "Hello"`,
-        });
-        messages.push({
-          role: 'assistant',
-          content: `I'll create greet.py for you.`,
-        });
-        messages.push({
-          role: 'tool',
-          content: `[Done: wrote ${effectiveWorkspaceRoot}/greet.py (4 lines)]`,
-        });
-        messages.push({
-          role: 'assistant',
-          content: `Created \`greet.py\` with a greeting function.`,
-        });
-      }
+      // ===== CONVERSATION HISTORY (last 16 exchanges = 32 messages) =====
+      // NOTE: No fake priming messages — they poison the context for subsequent requests.
+      const history = options.history?.slice(-32) || [];
 
       for (const msg of history) {
-        messages.push({
-          role: String(msg.role) === 'ai' ? 'assistant' : 'user',
-          content: String(msg.content),
-        });
+        const role = String(msg.role) === 'ai' ? 'assistant' : 'user';
+        const content = String(msg.content || '').trim();
+        if (!content) continue; // Skip empty history messages
+        messages.push({ role, content });
       }
 
       // ===== BUILD USER MESSAGE =====
@@ -1138,6 +1109,7 @@ When user mentions a specific file (e.g., "edit TicTacToe.java", "fix Main.py"):
     const MAX_ROUNDS = 8;
 
     for (let round = 0; round < MAX_ROUNDS; round++) {
+      console.log(`[CodeNative AI] Agent round ${round + 1}/${MAX_ROUNDS}, history depth: ${messages.length}`);
       const response = await fetch(`${OLLAMA_URL}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1146,7 +1118,12 @@ When user mentions a specific file (e.g., "edit TicTacToe.java", "fix Main.py"):
           messages,
           tools: TOOL_DEFINITIONS,
           stream: false,
-          options: ollamaOptions,
+          options: {
+            ...ollamaOptions,
+            // Guarantee a consistent context window so the model never loses
+            // the system prompt or early conversation turns.
+            num_ctx: 8192,
+          },
         }),
         signal: controller.signal,
       });
@@ -1167,8 +1144,14 @@ When user mentions a specific file (e.g., "edit TicTacToe.java", "fix Main.py"):
       if (msg.tool_calls && msg.tool_calls.length > 0) {
         console.log(`[CodeNative AI] Round ${round + 1}: ${msg.tool_calls.length} structured tool call(s)`);
 
-        // Add assistant message to history
-        messages.push({ role: 'assistant', content: msg.content || '' });
+        // Only add assistant message if it has actual content (Ollama often sends empty string here)
+        const assistantContent = (msg.content || '').trim();
+        if (assistantContent) {
+          stream.emitData({ kind: 'content', content: assistantContent + '\n' });
+          messages.push({ role: 'assistant', content: assistantContent });
+        } else {
+          messages.push({ role: 'assistant', content: '' });
+        }
 
         for (const tc of msg.tool_calls) {
           const toolName = normalizeToolName(tc.function?.name || '');
@@ -1237,19 +1220,25 @@ When user mentions a specific file (e.g., "edit TicTacToe.java", "fix Main.py"):
         continue; // next round
       }
 
-      // === PATH B.5: Retry if model seems to want to use tools but didn't format correctly ===
-      const looksLikeToolIntent = /(?:create|write|read|edit|modify|update|add|fix|change).*(?:file|code)/i.test(textContent)
-        || /(?:I'll|I will|Let me).*(?:create|write|read|edit)/i.test(textContent)
-        || /```(?:json)?\s*\{/i.test(textContent); // Started JSON but we couldn't parse it
+      // === PATH B.5: Retry ONLY if model clearly tried JSON tool-call format but failed to parse ===
+      // IMPORTANT: Do NOT trigger on generic words like "change", "add", "fix" — those appear in
+      // any natural language explanation and cause the model to loop endlessly on text answers.
+      const looksLikeFailedToolCall =
+        // Model started a JSON block but it wasn't parseable
+        /```(?:json)?\s*\{[\s\S]*$/i.test(textContent)
+        // Model explicitly wrote out a tool name in JSON format
+        || /"name"\s*:\s*"(?:create_file|read_file|find_and_replace|list_files|search_code|create_project)"/i.test(textContent)
+        // Model wrote raw {"function":...} object (OpenAI-style)
+        || /"function"\s*:\s*\{\s*"name"/i.test(textContent);
 
-      if (looksLikeToolIntent && round < MAX_ROUNDS - 1) {
-        console.log(`[CodeNative AI] Round ${round + 1}: Model seems to want tools but didn't call them - retrying`);
+      if (looksLikeFailedToolCall && round < MAX_ROUNDS - 2) {
+        console.log(`[CodeNative AI] Round ${round + 1}: Model tried to emit raw JSON tool call — nudging to use structured tool_calls API`);
         messages.push({ role: 'assistant', content: textContent });
         messages.push({
           role: 'user',
-          content: `You need to actually use the tools to complete this task. Output a JSON object with "name" (one of: create_file, read_file, find_and_replace, list_files, search_code) and "arguments" containing the required parameters. Do not just describe what you would do - call the tool.`,
+          content: `Please use the structured tool_call API to call the tool — do not output JSON text. Call the function directly.`,
         });
-        continue; // retry with explicit instruction
+        continue;
       }
 
       // === PATH C: No tool calls — just text response. Done. ===
@@ -1468,11 +1457,13 @@ When user mentions a specific file (e.g., "edit TicTacToe.java", "fix Main.py"):
         return true;
       }
       if (fp && (obj.find_text || obj.old_text || obj.search) && (obj.replace_text || obj.new_text || obj.replacement)) {
-        results.push({ name: 'find_and_replace', args: {
-          file_path: fp,
-          find_text: obj.find_text || obj.old_text || obj.search,
-          replace_text: obj.replace_text || obj.new_text || obj.replacement
-        } });
+        results.push({
+          name: 'find_and_replace', args: {
+            file_path: fp,
+            find_text: obj.find_text || obj.old_text || obj.search,
+            replace_text: obj.replace_text || obj.new_text || obj.replacement
+          }
+        });
         return true;
       }
       if (fp && !obj.content && !obj.code && !obj.find_text && !obj.old_text) {
