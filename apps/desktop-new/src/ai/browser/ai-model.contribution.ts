@@ -6,6 +6,7 @@ import { AIModelServicePath, IAIModelServiceProxy, ModelSettingId } from '../com
 import { OutputChannel } from '@opensumi/ide-output/lib/browser/output.channel';
 import { OutputService } from '@opensumi/ide-output/lib/browser/output.service';
 import { MessageService } from '@opensumi/ide-overlay/lib/browser/message.service';
+import { IWorkspaceService } from '@opensumi/ide-workspace';
 
 const ModelSettingIdKeys = Object.keys(ModelSettingId);
 
@@ -87,6 +88,9 @@ export class AIModelContribution implements PreferenceContribution, SettingContr
   @Autowired(IPreferenceSettingsService)
   preferenceSettingsService: IPreferenceSettingsService
 
+  @Autowired(IWorkspaceService)
+  private readonly workspaceService: IWorkspaceService;
+
   #output: OutputChannel
 
   get output() {
@@ -108,6 +112,26 @@ export class AIModelContribution implements PreferenceContribution, SettingContr
     })
     delayer.trigger(() => this.setModeConfig(values));
     this.checkModelConfig();
+
+    // Wire up workspace root for RAG indexing — try immediately, then listen for changes
+    this.sendWorkspaceRoot();
+
+    // Also listen for workspace root changes (folder open/close)
+    this.workspaceService.onWorkspaceChanged(() => {
+      this.sendWorkspaceRoot();
+    });
+
+    // Retry after a delay in case workspace wasn't ready during onDidStart
+    setTimeout(() => this.sendWorkspaceRoot(), 3000);
+  }
+
+  private sendWorkspaceRoot(): void {
+    const workspaceRootUri = this.workspaceService.getWorkspaceRootUri(undefined);
+    if (workspaceRootUri) {
+      const rootStr = workspaceRootUri.toString();
+      console.log(`[CodeNative AI] Sending workspace root: ${rootStr}`);
+      this.modelService.setWorkspaceRoot(rootStr);
+    }
   }
 
   registerSetting(registry: ISettingRegistry): void {

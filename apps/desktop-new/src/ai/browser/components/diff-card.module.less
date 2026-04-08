@@ -1,0 +1,238 @@
+.diffCard {
+  border: 1px solid var(--border, #3a3a3a);
+  border-radius: 8px;
+  overflow: hidden;
+  margin: 8px 0;
+  font-family: var(--editor-font-family, 'Menlo', 'Consolas', monospace);
+  font-size: 12px;
+  background: var(--editor-background, #1e1e1e);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--sideBar-background, #252526);
+  border-bottom: 1px solid var(--border, #3a3a3a);
+  user-select: none;
+}
+
+.filename {
+  font-weight: 600;
+  color: var(--foreground, #cccccc);
+  font-size: 12px;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.addBadge {
+  background: rgba(78, 201, 176, 0.15);
+  color: #4ec9b0;
+}
+
+.removeBadge {
+  background: rgba(244, 71, 71, 0.15);
+  color: #f44747;
+}
+
+.diffBody {
+  max-height: 400px;
+  overflow-y: auto;
+  overflow-x: auto;
+  background: var(--editor-background, #1e1e1e);
+}
+
+.diffLine {
+  display: flex;
+  align-items: flex-start;
+  min-height: 20px;
+  line-height: 20px;
+  white-space: pre;
+  font-size: 12px;
+}
+
+.lineNum {
+  min-width: 36px;
+  text-align: right;
+  padding-right: 8px;
+  color: var(--editorLineNumber-foreground, #858585);
+  user-select: none;
+  opacity: 0.6;
+  flex-shrink: 0;
+}
+
+.linePrefix {
+  min-width: 16px;
+  text-align: center;
+  flex-shrink: 0;
+  font-weight: bold;
+}
+
+.lineContent {
+  flex: 1;
+  padding-right: 8px;
+  tab-size: 4;
+}
+
+.diffLineAdd {
+  background: rgba(78, 201, 176, 0.12);
+  border-left: 3px solid #4ec9b0;
+
+  .linePrefix {
+    color: #4ec9b0;
+  }
+
+  .lineContent {
+    color: var(--foreground, #d4d4d4);
+  }
+
+  .lineNum {
+    color: #4ec9b0;
+    opacity: 0.8;
+  }
+}
+
+.diffLineRemove {
+  background: rgba(244, 71, 71, 0.12);
+  border-left: 3px solid #f44747;
+
+  .linePrefix {
+    color: #f44747;
+  }
+
+  .lineContent {
+    color: var(--foreground, #d4d4d4);
+  }
+
+  .lineNum {
+    color: #f44747;
+    opacity: 0.8;
+  }
+}
+
+.diffLineContext {
+  border-left: 3px solid transparent;
+  opacity: 0.7;
+
+  .linePrefix {
+    color: transparent;
+  }
+}
+
+.hunkHeader {
+  display: flex;
+  align-items: center;
+  padding: 2px 8px;
+  background: rgba(0, 122, 204, 0.1);
+  color: #569cd6;
+  font-size: 11px;
+  opacity: 0.8;
+  user-select: none;
+  border-left: 3px solid #569cd6;
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--sideBar-background, #252526);
+  border-top: 1px solid var(--border, #3a3a3a);
+}
+
+.acceptBtn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border-radius: 4px;
+  border: none;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  background: rgba(78, 201, 176, 0.2);
+  color: #4ec9b0;
+  border: 1px solid rgba(78, 201, 176, 0.4);
+  transition: all 0.15s ease;
+
+  &:hover {
+    background: rgba(78, 201, 176, 0.35);
+    border-color: #4ec9b0;
+  }
+
+  &:active {
+    transform: scale(0.97);
+  }
+}
+
+.rejectBtn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border-radius: 4px;
+  border: none;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  background: rgba(244, 71, 71, 0.15);
+  color: #f44747;
+  border: 1px solid rgba(244, 71, 71, 0.3);
+  transition: all 0.15s ease;
+
+  &:hover {
+    background: rgba(244, 71, 71, 0.3);
+    border-color: #f44747;
+  }
+
+  &:active {
+    transform: scale(0.97);
+  }
+}
+
+.applied {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #4ec9b0;
+  margin-left: auto;
+}
+
+.reverted {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #f44747;
+  margin-left: auto;
+}
+
+.expandToggle {
+  margin-left: auto;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--foreground, #cccccc);
+  opacity: 0.5;
+  font-size: 11px;
+  padding: 2px 4px;
+
+  &:hover {
+    opacity: 1;
+  }
+}

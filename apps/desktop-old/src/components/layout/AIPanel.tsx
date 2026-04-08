@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Bot, Trash2, Sparkles, X, StopCircle, RefreshCw, ChevronDown, Copy, Check, Cpu, WifiOff, FileEdit, FilePlus, FolderTree, CheckCircle2, XCircle } from 'lucide-react';
+import { Send, Bot, Trash2, Sparkles, X, StopCircle, RefreshCw, ChevronDown, Copy, Check, Cpu, WifiOff, FileEdit, FilePlus, FolderTree, CheckCircle2, XCircle, Database } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
@@ -364,7 +364,7 @@ export const AIPanel: React.FC = () => {
     const {
         messages, sendMessage, isLoading, error, clearMessages,
         connectionStatus, models, selectedModel, setSelectedModel, retryConnection,
-        indexProject, isProjectIndexed,
+        indexProject, reindexProject, isProjectIndexed, isVectorIndexed,
     } = useOllama();
 
     const {
@@ -522,6 +522,14 @@ export const AIPanel: React.FC = () => {
                         active={includeContext}
                         activeColor="#9ece6a"
                     />
+                    {isProjectIndexed && (
+                        <HeaderAction
+                            icon={<RefreshCw size={14} />}
+                            title="Re-index project"
+                            onClick={reindexProject}
+                            active={false}
+                        />
+                    )}
                     {connectionStatus === 'disconnected' && (
                         <HeaderAction icon={<RefreshCw size={14} />} title="Retry" onClick={retryConnection} />
                     )}
@@ -530,14 +538,31 @@ export const AIPanel: React.FC = () => {
                 </div>
             </div>
 
-            {/* Model Selector */}
-            <div className="px-4 py-2" style={{ borderBottom: '1px solid #292e42', backgroundColor: '#1a1b26' }}>
+            {/* Model Selector + RAG mode badge */}
+            <div className="px-4 py-2 flex items-center justify-between" style={{ borderBottom: '1px solid #292e42', backgroundColor: '#1a1b26' }}>
                 <ModelSelector
                     models={models}
                     selectedModel={selectedModel}
                     onSelect={setSelectedModel}
                     connectionStatus={connectionStatus}
                 />
+                {isProjectIndexed && (
+                    <div
+                        className="flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-semibold"
+                        title={isVectorIndexed ? 'Hybrid BM25 + Vector search active' : 'BM25 keyword search active (vector indexing…)'}
+                        style={{
+                            backgroundColor: isVectorIndexed ? 'rgba(122, 162, 247, 0.12)' : 'rgba(224, 175, 104, 0.10)',
+                            color: isVectorIndexed ? '#7aa2f7' : '#e0af68',
+                            border: `1px solid ${isVectorIndexed ? 'rgba(122, 162, 247, 0.25)' : 'rgba(224, 175, 104, 0.2)'}`,
+                        }}
+                    >
+                        <Database size={10} />
+                        <span>{isVectorIndexed ? 'Hybrid' : 'BM25'}</span>
+                        {!isVectorIndexed && (
+                            <span className="w-1.5 h-1.5 rounded-full animate-pulse ml-0.5" style={{ backgroundColor: '#e0af68' }} />
+                        )}
+                    </div>
+                )}
             </div>
 
             {/* Messages Area */}
@@ -556,15 +581,28 @@ export const AIPanel: React.FC = () => {
                             Your local AI coding companion powered by Ollama. Ask questions, generate code, or debug issues.
                         </p>
                         {connectionStatus === 'connected' && (
-                            <div className="flex items-center gap-2 px-3 py-2 rounded-full text-[11px]"
-                                style={{
-                                    backgroundColor: 'rgba(158, 206, 106, 0.08)',
-                                    color: '#9ece6a',
-                                    border: '1px solid rgba(158, 206, 106, 0.15)',
-                                }}>
-                                <div className="w-1.5 h-1.5 rounded-full animate-pulse"
-                                    style={{ backgroundColor: '#9ece6a' }} />
-                                Connected to Ollama
+                            <div className="flex flex-col items-center gap-2">
+                                <div className="flex items-center gap-2 px-3 py-2 rounded-full text-[11px]"
+                                    style={{
+                                        backgroundColor: 'rgba(158, 206, 106, 0.08)',
+                                        color: '#9ece6a',
+                                        border: '1px solid rgba(158, 206, 106, 0.15)',
+                                    }}>
+                                    <div className="w-1.5 h-1.5 rounded-full animate-pulse"
+                                        style={{ backgroundColor: '#9ece6a' }} />
+                                    Connected to Ollama
+                                </div>
+                                {isProjectIndexed && (
+                                    <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px]"
+                                        style={{
+                                            backgroundColor: isVectorIndexed ? 'rgba(122, 162, 247, 0.08)' : 'rgba(224, 175, 104, 0.08)',
+                                            color: isVectorIndexed ? '#7aa2f7' : '#e0af68',
+                                            border: `1px solid ${isVectorIndexed ? 'rgba(122, 162, 247, 0.15)' : 'rgba(224, 175, 104, 0.15)'}`,
+                                        }}>
+                                        <Database size={11} />
+                                        <span>{isVectorIndexed ? 'Hybrid BM25 + Vector search' : 'BM25 search (vector indexing…)'}</span>
+                                    </div>
+                                )}
                             </div>
                         )}
                         {connectionStatus === 'disconnected' && (

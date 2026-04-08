@@ -1,17 +1,18 @@
 /**
  * promptBuilder.ts — System Prompt Builder for RAG
- * 
+ *
  * Constructs the enhanced system prompt that includes:
  * 1. Project file tree overview
- * 2. Retrieved relevant code chunks
- * 3. Active file content (what user is editing)
+ * 2. Retrieved relevant code chunks (via hybrid BM25 + vector search)
+ * 3. Active file content (what the user is editing)
  * 4. Instructions for AI to use [operation:...] syntax
- * 
+ *
  * @author CodeNative Team
  */
 
 import { getIndex } from './fileIndexer';
-import { retrieve, RetrievalResult } from './contextRetriever';
+import { retrieve as bm25Retrieve, RetrievalResult } from './contextRetriever';
+import { hybridRetrieve, isVectorIndexAvailable } from './vectorRetriever';
 
 interface PromptContext {
     query: string;
@@ -20,9 +21,20 @@ interface PromptContext {
 }
 
 /**
+ * Retrieve relevant chunks using hybrid (BM25 + vector) search when
+ * ChromaDB is available, or BM25-only otherwise.
+ */
+async function retrieveContext(query: string, topK: number): Promise<RetrievalResult[]> {
+    if (isVectorIndexAvailable()) {
+        return hybridRetrieve(query, topK);
+    }
+    return bm25Retrieve(query, topK, true);
+}
+
+/**
  * Build the full system prompt with RAG context
  */
-export function buildSystemPrompt(ctx: PromptContext): string {
+export async function buildSystemPrompt(ctx: PromptContext): Promise<string> {
     const index = getIndex();
     const parts: string[] = [];
 
@@ -50,7 +62,7 @@ Total: ${index.totalFiles} files indexed.`);
     }
 
     // ═══ Retrieved Context ═══
-    const results = retrieve(ctx.query, 8);
+    const results = await retrieveContext(ctx.query, 8);
     if (results.length > 0) {
         parts.push(`\n## Relevant Code from Project`);
 
@@ -128,3 +140,4 @@ To delete: \`\`\`[operation:delete] path/to/file.ts
 For modify operations, include the COMPLETE file content.
 Always explain changes before showing code blocks.`;
 }
+

@@ -53,7 +53,9 @@ interface UseOllamaReturn {
     fetchModels: () => Promise<void>;                           // Refresh models list
     retryConnection: () => Promise<void>;                       // Try reconnecting
     indexProject: (path: string) => Promise<void>;              // Index project for RAG
-    isProjectIndexed: boolean;                                  // Indexing status
+    reindexProject: () => Promise<void>;                        // Clear and re-index
+    isProjectIndexed: boolean;                                  // BM25 index ready
+    isVectorIndexed: boolean;                                   // ChromaDB vector index ready (hybrid search)
 }
 
 // Backend API URL - this is where our Express server runs
@@ -93,6 +95,9 @@ export function useOllama(): UseOllamaReturn {
 
     // RAG indexing status
     const [isProjectIndexed, setIsProjectIndexed] = useState(false);
+
+    // Vector indexing status - true when ChromaDB hybrid search is ready
+    const [isVectorIndexed, setIsVectorIndexed] = useState(false);
 
     /**
      * Update selected model and save to localStorage
@@ -342,6 +347,30 @@ export function useOllama(): UseOllamaReturn {
     }, []);
 
     /**
+     * Poll /api/rag/status until vectorIndexAvailable is true or timeout
+     */
+    const MAX_POLL_ATTEMPTS = 20;
+    const POLL_INTERVAL_MS = 2000;
+
+    const pollVectorStatus = useCallback(async () => {
+        for (let i = 0; i < MAX_POLL_ATTEMPTS; i++) {
+            await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
+            try {
+                const res = await fetch(`${BACKEND_URL}/api/rag/status`);
+                const json = await res.json();
+                if (json.success && json.data?.vectorIndexAvailable) {
+                    setIsVectorIndexed(true);
+                    return;
+                }
+            } catch {
+                // non-fatal — keep polling
+            }
+        }
+        // Timed out without confirming vector index — explicitly reset flag
+        setIsVectorIndexed(false);
+    }, []);
+
+    /**
      * Index a project directory for RAG context
      */
     const indexProjectFn = useCallback(async (path: string) => {
@@ -354,12 +383,36 @@ export function useOllama(): UseOllamaReturn {
             const result = await response.json();
             if (result.success) {
                 setIsProjectIndexed(true);
+                setIsVectorIndexed(false);
                 console.log(`[RAG] Indexed: ${result.data.totalFiles} files, ${result.data.totalChunks} chunks`);
+                // Vector indexing runs in background on the backend; poll for readiness
+                pollVectorStatus();
             }
         } catch (err) {
             console.warn('[RAG] Failed to index project:', err);
         }
-    }, []);
+    }, [pollVectorStatus]);
+
+    /**
+     * Clear the current index and re-index the project from scratch
+     */
+    const reindexProjectFn = useCallback(async () => {
+        try {
+            setIsVectorIndexed(false);
+            const response = await fetch(`${BACKEND_URL}/api/rag/reindex`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({}),
+            });
+            const result = await response.json();
+            if (result.success) {
+                console.log(`[RAG] Re-indexed: ${result.data.totalFiles} files, ${result.data.totalChunks} chunks`);
+                pollVectorStatus();
+            }
+        } catch (err) {
+            console.warn('[RAG] Failed to reindex project:', err);
+        }
+    }, [pollVectorStatus]);
 
     // Return everything the component needs
     return {
@@ -375,6 +428,8 @@ export function useOllama(): UseOllamaReturn {
         fetchModels,
         retryConnection,
         indexProject: indexProjectFn,
+        reindexProject: reindexProjectFn,
         isProjectIndexed,
+        isVectorIndexed,
     };
 }

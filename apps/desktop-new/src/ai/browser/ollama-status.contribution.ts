@@ -20,8 +20,8 @@ export class OllamaStatusContribution implements ClientAppContribution {
     onDidStart(app: IClientApp): MaybePromise<void> {
         // Add initial status bar element
         this.statusBarAccessor = this.statusBarService.addElement(OLLAMA_STATUS_ID, {
-            text: '$(sync~spin) Ollama',
-            tooltip: 'Checking Ollama connection...',
+            text: '$(sync~spin) AI',
+            tooltip: 'Checking AI backend and Ollama connection...',
             alignment: StatusBarAlignment.RIGHT,
             priority: 100,
             color: '#999999',
@@ -39,8 +39,8 @@ export class OllamaStatusContribution implements ClientAppContribution {
 
             if (isOnline) {
                 this.statusBarService.setElement(OLLAMA_STATUS_ID, {
-                    text: '$(check) Ollama',
-                    tooltip: 'Ollama is running and connected',
+                    text: '$(check) AI',
+                    tooltip: 'Ollama is running. BM25 + vector hybrid RAG context is active.',
                     color: '#89d185',
                 });
             } else {
@@ -53,7 +53,7 @@ export class OllamaStatusContribution implements ClientAppContribution {
 
     private setOfflineStatus() {
         this.statusBarService.setElement(OLLAMA_STATUS_ID, {
-            text: '$(error) Ollama',
+            text: '$(error) AI',
             tooltip: 'Ollama is not running. Start it with: ollama serve',
             color: '#f48771',
         });
