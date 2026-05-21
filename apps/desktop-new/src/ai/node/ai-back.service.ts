@@ -22,6 +22,7 @@ import {
   DiffResult,
 } from './rag/diffService';
 import { startFileWatcher, stopFileWatcher } from './rag/fileWatcher';
+import { compressFileForQuery, compressToolReadResult } from './rag/promptCompressor';
 
 // Ollama API
 const OLLAMA_URL = 'http://127.0.0.1:11434';
@@ -61,19 +62,33 @@ const TOOL_DEFINITIONS = [
     type: 'function',
     function: {
       name: 'create_file',
-      description: `Create a NEW file or OVERWRITE an existing file completely.
+      description: `Create a NEW file or COMPLETELY OVERWRITE an existing file.
 
-CRITICAL: If user mentions a specific filename (e.g., "edit TicTacToe.java"), use THAT EXACT filename, not a different name.
+⚠️  CONTENT QUALITY RULES (enforced, no exceptions):
+- ALWAYS write the COMPLETE, FULLY WORKING implementation — never a skeleton or stub
+- NEVER use placeholder comments like "// implement here", "// TODO", "// add code"
+- NEVER write partial classes or empty method bodies — every method must have real code
+- If user asks for "Prim's algorithm", write the full graph traversal, priority queue, MST logic
+- If user asks for "a login page", write real HTML/CSS/JS — not "<form><!-- add fields --></form>"
+- The file content must be immediately runnable / compilable
 
 When to use:
 - Creating a brand new file that doesn't exist
-- Completely replacing ALL content of an existing file
-- User says "remove all code and put..." or "replace everything in..."`,
+- Completely replacing ALL content of an existing file (after reading it first)
+- User says "rewrite", "replace everything", "start fresh"
+
+FILENAME RULE: If user says "make Prism.java" → file_path must end with Prism.java. Match exactly.`,
       parameters: {
         type: 'object',
         properties: {
-          file_path: { type: 'string', description: 'Absolute OS file path. MUST match the file user mentioned.' },
-          content: { type: 'string', description: 'Complete file content to write' },
+          file_path: {
+            type: 'string',
+            description: 'Absolute OS file path. Must match the filename the user specified exactly (case-sensitive on Linux/Mac).',
+          },
+          content: {
+            type: 'string',
+            description: 'The COMPLETE file content. Must be fully working code — no placeholders, no stubs, no TODOs left unimplemented.',
+          },
         },
         required: ['file_path', 'content'],
       },
@@ -102,22 +117,35 @@ When to use:
     type: 'function',
     function: {
       name: 'find_and_replace',
-      description: `Replace a specific text snippet in a file. Only for SMALL surgical edits.
+      description: `Surgically replace ONE specific text block inside a file. For small, precise edits.
 
-IMPORTANT:
-- find_text must be an EXACT substring from read_file output
-- For large changes, use create_file with full updated content instead
-- If this fails, fallback to create_file
+HOW TO USE CORRECTLY:
+1. First call read_file to get the exact current content
+2. Copy the EXACT text you want to replace from the read_file output (including indentation)
+3. Set find_text = that exact snippet, replace_text = the new version
+
+⚠️  RULES:
+- find_text must be a unique substring — if it appears multiple times, use create_file instead
+- For changes to more than ~20 lines, use create_file with the full updated content — it is safer
+- replace_text must be COMPLETE code — never leave placeholder comments in the replacement
+- If this tool returns an error, immediately retry with create_file
 
 When to use:
-- Small edits: fixing a bug, changing a variable name
-- NOT for replacing entire file content`,
+- Fixing a single bug (changing one return value, fixing one condition)
+- Renaming a variable in one function
+- Adding/removing one import statement`,
       parameters: {
         type: 'object',
         properties: {
-          file_path: { type: 'string', description: 'Absolute OS file path' },
-          find_text: { type: 'string', description: 'Exact current text to find (copy from read_file output)' },
-          replace_text: { type: 'string', description: 'New text to replace it with' },
+          file_path: { type: 'string', description: 'Absolute OS file path to the file to edit' },
+          find_text: {
+            type: 'string',
+            description: 'The EXACT text to find (copy it character-for-character from read_file output, including spaces and newlines)',
+          },
+          replace_text: {
+            type: 'string',
+            description: 'The new text to put in place of find_text. Must be complete, working code.',
+          },
         },
         required: ['file_path', 'find_text', 'replace_text'],
       },
@@ -663,6 +691,14 @@ export class AIBackService extends BaseAIBackService implements IAIBackService {
   private _workspaceRoot: string = '';
   private _indexBuilt = false;
 
+  // ===== Conversation Memory (Enhancement 1: Cursor-style session summarization) =====
+  // After MEMORY_THRESHOLD turns, old history is compressed into a summary block.
+  // This keeps the active context window lean while preserving long-session continuity.
+  private _sessionMemory: string = '';
+  private _memoryMessageCount: number = 0;
+  private static readonly MEMORY_THRESHOLD = 8; // compress after this many history messages
+  private static readonly MEMORY_COMPRESS_KEEP = 4; // keep last N messages verbatim after compress
+
   setModelConfig(config: IModelConfig): void {
     this._config = config;
     this.logger.log('[model config updated] model:', config.codeModelName || '(auto)');
@@ -685,6 +721,9 @@ export class AIBackService extends BaseAIBackService implements IAIBackService {
 
     this._workspaceRoot = cleanDir;
     this._indexBuilt = false;
+    // Reset session memory when workspace changes
+    this._sessionMemory = '';
+    this._memoryMessageCount = 0;
     setToolWorkspaceRoot(cleanDir); // Set workspace root for diff service
     console.log(`[CodeNative AI] Workspace root set to: ${cleanDir}`);
 
@@ -800,6 +839,71 @@ export class AIBackService extends BaseAIBackService implements IAIBackService {
     return chatReadableStream;
   }
 
+  // ======================== MEMORY COMPRESSION ========================
+
+  /**
+   * Cursor-style conversation memory summarization.
+   * When history grows beyond MEMORY_THRESHOLD messages, we call Ollama to
+   * compress the oldest half into a short "session memory" paragraph.
+   * The summary is prepended to every subsequent prompt so the model never
+   * loses track of long-running context.
+   */
+  private async compressHistory(
+    history: Array<{ role: string; content: string }>,
+    model: string,
+  ): Promise<{ compressed: Array<{ role: string; content: string }>; memory: string }> {
+    const threshold = AIBackService.MEMORY_THRESHOLD;
+    const keep = AIBackService.MEMORY_COMPRESS_KEEP;
+
+    if (history.length < threshold) {
+      return { compressed: history, memory: this._sessionMemory };
+    }
+
+    // Split: compress the old part, keep the recent part verbatim
+    const toCompress = history.slice(0, history.length - keep);
+    const toKeep = history.slice(history.length - keep);
+
+    // Build a concise summary prompt
+    const summaryMessages = [
+      {
+        role: 'system',
+        content: 'You are a memory assistant. Summarize the following conversation into 3-5 bullet points. Focus on: what files were created/edited, what the user\'s goal is, and any important decisions made. Be extremely concise. Output ONLY the bullet points, no intro.',
+      },
+      {
+        role: 'user',
+        content: toCompress
+          .map(m => `${m.role === 'assistant' ? 'Assistant' : 'User'}: ${m.content.slice(0, 300)}`)
+          .join('\n'),
+      },
+    ];
+
+    try {
+      const res = await fetch(`${OLLAMA_URL}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model, messages: summaryMessages, stream: false, options: { num_ctx: 2048, temperature: 0 } }),
+        signal: AbortSignal.timeout(15000),
+      });
+
+      if (res.ok) {
+        const json = await res.json() as { message?: { content?: string } };
+        const summary = (json.message?.content || '').trim();
+        if (summary) {
+          const existingMemory = this._sessionMemory ? this._sessionMemory + '\n' : '';
+          this._sessionMemory = existingMemory + summary;
+          this._memoryMessageCount = toKeep.length;
+          console.log(`[CodeNative AI] Memory compressed: ${toCompress.length} messages → summary (${summary.length} chars)`);
+          return { compressed: toKeep, memory: this._sessionMemory };
+        }
+      }
+    } catch (err) {
+      console.warn('[CodeNative AI] Memory compression failed (non-fatal):', err);
+    }
+
+    // Fallback: just truncate without summarizing
+    return { compressed: toKeep, memory: this._sessionMemory };
+  }
+
   // ======================== CORE: streamFromOllama ========================
 
   private async streamFromOllama(
@@ -853,9 +957,10 @@ export class AIBackService extends BaseAIBackService implements IAIBackService {
         if (resolvedPath && !mentionedPaths.has(resolvedPath)) {
           mentionedPaths.add(resolvedPath);
           try {
-            const content = fs.readFileSync(resolvedPath, 'utf-8');
-            const truncated = content.length > 4000 ? content.substring(0, 4000) + '\n...(truncated)' : content;
-            atMentionContext += `\n<at_mention path="${resolvedPath}">\n${truncated}\n</at_mention>`;
+            const rawContent = fs.readFileSync(resolvedPath, 'utf-8');
+            // Context-Aware Compression: score each section vs. the query
+            const compressed = compressFileForQuery(rawContent, resolvedPath, input, 120);
+            atMentionContext += `\n<at_mention path="${resolvedPath}" lines="${compressed.compressedLines}/${compressed.originalLines}">\n${compressed.content}\n</at_mention>`;
           } catch { }
         }
       }
@@ -900,13 +1005,19 @@ export class AIBackService extends BaseAIBackService implements IAIBackService {
         activeEditorSection = `\n\n## ACTIVE EDITOR\nFile: ${activeFile.path}${lineInfo}${langInfo}\n`;
         activeEditorSection += `When user says "this file", "the current file", "it", or refers to line numbers without specifying a file → use: ${activeFile.path}`;
 
-        // Auto-inject first 80 lines of active file for code_action/project intents
+        // Context-Aware Prompt Compression (Enhancement 3):
+        // Instead of naively sending the first 80 lines, we score every section
+        // of the active file against the user's query and send only relevant
+        // sections + collapsed summaries of the rest. 60-80% token reduction.
         if ((queryIntent === 'code_action' || queryIntent === 'project' || queryIntent === 'hybrid') && !mentionedPaths.has(activeFile.path)) {
           try {
             if (fs.existsSync(activeFile.path)) {
-              const content = fs.readFileSync(activeFile.path, 'utf-8');
-              const lines = content.split('\n').slice(0, 80).join('\n');
-              activeEditorSection += `\n\n<active_file>\n${lines}\n${content.split('\n').length > 80 ? '...(truncated)' : ''}\n</active_file>`;
+              const rawContent = fs.readFileSync(activeFile.path, 'utf-8');
+              const compressed = compressFileForQuery(rawContent, activeFile.path, input, 150);
+              const statsNote  = compressed.wasAlreadySmall
+                ? ''
+                : ` [compressed ${compressed.originalLines}→${compressed.compressedLines} lines, ${Math.round(compressed.compressionRatio * 100)}% reduction]`;
+              activeEditorSection += `\n\n<active_file${statsNote}>\n${compressed.content}\n</active_file>`;
             }
           } catch { }
         }
@@ -930,35 +1041,92 @@ You have access to these tools. Use them via the structured tool_call API — NE
 ### AVAILABLE TOOLS:
 | Tool | When to use |
 |------|-------------|
-| create_file | Create a new file OR replace an entire file's content |
-| read_file | Read a file before editing (ALWAYS do this first) |
-| find_and_replace | Surgical/small edits only (single change per call) |
-| list_files | Discover directory structure |
-| search_code | Find function definitions, usages, patterns in codebase |
-| create_project | Scaffold multiple files at once for a new project |
+| create_file | Create a new file OR completely rewrite an existing file's content |
+| read_file | Read a file before editing — ALWAYS do this first before any edit |
+| find_and_replace | One surgical change only — copy exact text from read_file, replace precisely |
+| list_files | Discover what files/directories exist |
+| search_code | Find where a function/class/symbol is defined or used |
+| create_project | Scaffold multiple files at once for a whole new project |
 
-### RULES:
-1. **Read before editing** — Always call read_file before find_and_replace or create_file on existing files.
-2. **Exact filenames** — If user says "edit Foo.java", target Foo.java exactly, not FooHelper.java.
+### WORKFLOW RULES:
+1. **Read before editing** — ALWAYS call read_file before find_and_replace or create_file on existing files.
+2. **Exact filenames** — If user says "edit Prism.java", the file_path must end with Prism.java exactly.
 3. **Absolute paths** — Always use full absolute paths. Workspace root: \`${effectiveWorkspaceRoot || '(not set)'}\`
-4. **Large rewrites** — Use create_file with full updated content instead of many find_and_replace calls.
-5. **No raw JSON** — Do NOT output {"name":..., "arguments":...} blocks. Use tool_calls only.
-6. **No code blocks** — Do NOT output \`\`\`code\`\`\` blocks inline. The tool writes the file for you.
+4. **Large rewrites** — If changing more than ~20 lines, use create_file with the full updated content.
+5. **No raw JSON** — Do NOT output {"name":..., "arguments":...} blocks. Use the tool_calls API only.
+6. **No code blocks** — Do NOT output \`\`\`code\`\`\` blocks. The tool writes the file for you.
+
+### ⚡ CODE QUALITY (CRITICAL — this is the most important rule):
+- When writing ANY code, write the COMPLETE, FULLY WORKING implementation.
+- NEVER write placeholder comments like: "// implement here", "// TODO", "// add logic", "// insert algorithm".
+- NEVER write empty method bodies — every function must have real, working code inside.
+- NEVER write a skeleton and say "fill this in" — the user wants working code immediately.
+- If the user asks for Prim's algorithm → write the FULL graph + priority queue + MST traversal.
+- If the user asks for a sorting algorithm → write the complete sort with real comparisons.
+- If the user asks for a login form → write the complete HTML + CSS + validation JS.
+- Code quality: clean variable names, proper indentation, comments on complex logic.
 
 ### RESPONSE FORMAT:
-- Brief 1-sentence plan → call tool → 1-sentence confirmation.
-- If the user asks a question, answer it directly WITHOUT calling tools.
-- If the user asks to create/edit/read a file, use the tool — do not describe the code.`;
+- Call the tool IMMEDIATELY — do NOT write a planning sentence before calling it.
+- After the tool runs, write a single short confirmation sentence.
+- If user asks a question → answer directly, no tools needed.
+- WRONG: "Creating BellmanFord.java..." then stop. RIGHT: Call create_file right away.`;
+
+      // ── Repo Map (Enhancement 2: Aider-style symbol index) ──
+      // For code_action and project intents, inject a compact repo map showing all
+      // exported symbols per file. This gives the model the full architecture picture
+      // without reading every file, similar to Aider's "repo map" feature.
+      let repoMapSection = '';
+      if ((queryIntent === 'code_action' || queryIntent === 'project' || queryIntent === 'hybrid') && currentIndex?.symbolsMap) {
+        const mapLines = currentIndex.symbolsMap.split('\n');
+        // Prioritize files mentioned in the query or active file's directory
+        const queryLower = input.toLowerCase();
+        const activeDir = activeFile?.path ? path.dirname(activeFile.path).toLowerCase() : '';
+
+        const prioritized: string[] = [];
+        const rest: string[] = [];
+        for (const line of mapLines) {
+          const lineLower = line.toLowerCase();
+          const isRelevant = queryLower.split(/\s+/).some(word => word.length > 3 && lineLower.includes(word))
+            || (activeDir && lineLower.includes(path.basename(activeDir).toLowerCase()));
+          if (isRelevant) prioritized.push(line);
+          else rest.push(line);
+        }
+
+        // Take up to 30 prioritized lines + 20 rest for a ~50 line map max
+        const selectedLines = [...prioritized.slice(0, 30), ...rest.slice(0, 20)];
+        if (selectedLines.length > 0) {
+          repoMapSection = `\n\n## REPO MAP (exported symbols)\n\`\`\`\n${selectedLines.join('\n')}\n\`\`\``;
+        }
+      }
+
+      // ===== CONVERSATION HISTORY with Memory Compression =====
+      // IMPORTANT: Run compressHistory FIRST so sessionMemory is available
+      // when we build the system prompt below.
+      const rawHistory: Array<{ role: string; content: string }> = (options.history?.slice(-32) || [])
+        .map(msg => ({
+          role: String(msg.role) === 'ai' ? 'assistant' : 'user',
+          content: String(msg.content || '').trim(),
+        }))
+        .filter(m => m.content.length > 0);
+
+      const { compressed: history, memory: sessionMemory } = await this.compressHistory(rawHistory, model);
+
+      // ── Restore variables that system prompt assembly needs ──
+      const smartContextHint = smartContext.systemNote
+        ? `\n\n## CONTEXT FROM CONVERSATION:\n${smartContext.systemNote}`
+        : '';
 
       const fileTreeSnippet = queryIntent !== 'general' && currentIndex?.fileTree
         ? `\n\nProject structure:\n${currentIndex.fileTree.split('\n').slice(0, 40).join('\n')}${currentIndex.fileTree.split('\n').length > 40 ? '\n...(truncated)' : ''}`
         : '';
 
-      const smartContextHint = smartContext.systemNote
-        ? `\n\n## CONTEXT FROM CONVERSATION:\n${smartContext.systemNote}`
+      // ── Session Memory section ──
+      const sessionMemorySection = sessionMemory
+        ? `\n\n## SESSION MEMORY (what we've done so far)\n${sessionMemory}`
         : '';
 
-      // Build a clean, layered system prompt
+      // ── Build the layered system prompt ──
       const baseIdentity = ragSystemPrompt
         ? `${ragSystemPrompt}`
         : [
@@ -970,8 +1138,10 @@ You have access to these tools. Use them via the structured tool_call API — NE
       const systemPrompt = [
         baseIdentity,
         workspaceInfo,
+        sessionMemorySection,
         activeEditorSection,
         openTabsSection,
+        repoMapSection,
         toolInstructions,
         smartContextHint,
         fileTreeSnippet,
@@ -979,33 +1149,25 @@ You have access to these tools. Use them via the structured tool_call API — NE
 
       messages.push({ role: 'system', content: systemPrompt });
 
-      // ===== CONVERSATION HISTORY (last 16 exchanges = 32 messages) =====
-      // NOTE: No fake priming messages — they poison the context for subsequent requests.
-      const history = options.history?.slice(-32) || [];
-
       for (const msg of history) {
-        const role = String(msg.role) === 'ai' ? 'assistant' : 'user';
-        const content = String(msg.content || '').trim();
-        if (!content) continue; // Skip empty history messages
-        messages.push({ role, content });
+        messages.push({ role: msg.role, content: msg.content });
       }
 
       // ===== BUILD USER MESSAGE =====
       let enrichedInput = input;
       let explicitFileContext = atMentionContext; // Start with @mention files
 
-      // 1. Auto-detect absolute file paths mentioned in the prompt (explicit mentions)
+      // 1. Auto-detect absolute file paths mentioned in the prompt
       const filePathMatches = input.match(/[A-Za-z]:[\\/][\w\\/.\-]+\.\w+/g);
       if (filePathMatches) {
         for (const rawPath of filePathMatches) {
           const cleanPath = cleanFilePath(rawPath);
           if (fs.existsSync(cleanPath) && !mentionedPaths.has(cleanPath)) {
             try {
-              const fileContent = fs.readFileSync(cleanPath, 'utf-8');
-              const truncated = fileContent.length > 3000
-                ? fileContent.substring(0, 3000) + '\n...(truncated)'
-                : fileContent;
-              explicitFileContext += `\n<explicit_file path="${cleanPath}">\n${truncated}\n</explicit_file>`;
+              const rawContent   = fs.readFileSync(cleanPath, 'utf-8');
+              // Context-Aware Compression: only relevant sections sent
+              const compressed   = compressFileForQuery(rawContent, cleanPath, input, 120);
+              explicitFileContext += `\n<explicit_file path="${cleanPath}" lines="${compressed.compressedLines}/${compressed.originalLines}">\n${compressed.content}\n</explicit_file>`;
               mentionedPaths.add(cleanPath);
             } catch { }
           }
@@ -1080,7 +1242,7 @@ You have access to these tools. Use them via the structured tool_call API — NE
       console.log(`[CodeNative AI] Request => model: ${model}, intent: ${queryIntent}, useTools: ${useTools}, ragChunks: ${ragResult?.rawResults.length ?? 0}`);
 
       if (useTools) {
-        await this.runAgentLoop(messages, model, stream, controller, ollamaOptions);
+        await this.runAgentLoop(messages, model, stream, controller, ollamaOptions, input);
       } else {
         await this.doStreamingChat(messages, model, stream, controller, ollamaOptions);
       }
@@ -1105,6 +1267,7 @@ You have access to these tools. Use them via the structured tool_call API — NE
     stream: ChatReadableStream,
     controller: AbortController,
     ollamaOptions: Record<string, any>,
+    userQuery: string = '',
   ) {
     const MAX_ROUNDS = 8;
 
@@ -1173,7 +1336,7 @@ You have access to these tools. Use them via the structured tool_call API — NE
             }
           }
 
-          messages.push({ role: 'tool', content: toolResult.message });
+          messages.push({ role: 'tool', content: compressToolReadResult(toolResult.message, userQuery) });
         }
         continue; // next round
       }
@@ -1210,6 +1373,9 @@ You have access to these tools. Use them via the structured tool_call API — NE
           }
 
           allResults += toolResult.message + '\n';
+          // Compress read_file results before storing in history
+          // (full content is already streamed to user; history only needs a lean summary)
+          messages.push({ role: 'tool', content: compressToolReadResult(toolResult.message, userQuery) });
         }
 
         // Follow-up prompt: short, prevents the model from looping
@@ -1220,23 +1386,36 @@ You have access to these tools. Use them via the structured tool_call API — NE
         continue; // next round
       }
 
-      // === PATH B.5: Retry ONLY if model clearly tried JSON tool-call format but failed to parse ===
-      // IMPORTANT: Do NOT trigger on generic words like "change", "add", "fix" — those appear in
-      // any natural language explanation and cause the model to loop endlessly on text answers.
+      // === PATH B.5: Retry if model output raw JSON instead of structured tool_calls ===
       const looksLikeFailedToolCall =
-        // Model started a JSON block but it wasn't parseable
         /```(?:json)?\s*\{[\s\S]*$/i.test(textContent)
-        // Model explicitly wrote out a tool name in JSON format
         || /"name"\s*:\s*"(?:create_file|read_file|find_and_replace|list_files|search_code|create_project)"/i.test(textContent)
-        // Model wrote raw {"function":...} object (OpenAI-style)
         || /"function"\s*:\s*\{\s*"name"/i.test(textContent);
 
       if (looksLikeFailedToolCall && round < MAX_ROUNDS - 2) {
-        console.log(`[CodeNative AI] Round ${round + 1}: Model tried to emit raw JSON tool call — nudging to use structured tool_calls API`);
+        console.log(`[CodeNative AI] Round ${round + 1}: Model emitted raw JSON — nudging to structured tool_calls`);
         messages.push({ role: 'assistant', content: textContent });
         messages.push({
           role: 'user',
           content: `Please use the structured tool_call API to call the tool — do not output JSON text. Call the function directly.`,
+        });
+        continue;
+      }
+
+      // === PATH B.6: Model announced intent but never called the tool ===
+      // Detects: "Creating X...", "I'll create...", "Writing X...", "Let me create..."
+      // These are plan-only responses — the model said what it would do but didn't do it.
+      const looksLikeUnfulfilledIntent =
+        round < MAX_ROUNDS - 2 &&
+        /(?:creating|writing|making|generating|building|implementing|let me create|i(?:'ll| will) (?:create|write|make|generate|implement)|now (?:creating|writing|making))/i.test(textContent) &&
+        /(?:file|java|py|ts|js|html|css|class|algorithm|function|method)/i.test(textContent);
+
+      if (looksLikeUnfulfilledIntent) {
+        console.log(`[CodeNative AI] Round ${round + 1}: Model stated intent without calling tool — nudging to execute`);
+        messages.push({ role: 'assistant', content: textContent });
+        messages.push({
+          role: 'user',
+          content: `You described what you would do but did not call the tool. Please call create_file (or the appropriate tool) RIGHT NOW with the complete implementation. Do not describe it — execute it.`,
         });
         continue;
       }

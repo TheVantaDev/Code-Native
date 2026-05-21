@@ -32,6 +32,8 @@ export interface IndexedProject {
   rootPath: string;
   chunks: CodeChunk[];
   fileTree: string;
+  /** Aider-style compact repo map: file → exported symbols */
+  symbolsMap: string;
   totalFiles: number;
   totalChunks: number;
   indexedAt: Date;
@@ -84,6 +86,117 @@ const STRUCTURE_AWARE_LANGUAGES = new Set([
   'typescript', 'javascript', 'python', 'java', 'go', 'rust',
   'cpp', 'c', 'ruby', 'php', 'swift', 'kotlin',
 ]);
+
+// ---------------------------------------------------------------------------
+// Symbol extraction — Aider-style repo map
+// ---------------------------------------------------------------------------
+
+/**
+ * Extract exported/top-level symbols from a file's content.
+ * Returns a compact single-line summary like:
+ *   "getUserById(), createUser(), class UserService, interface IUser"
+ */
+export function extractSymbols(content: string, language: string): string[] {
+  const symbols: string[] = [];
+  const lines = content.split('\n');
+
+  // Language-specific extraction patterns
+  const patterns: Array<{ re: RegExp; group: number; prefix?: string }> = [];
+
+  if (language === 'typescript' || language === 'javascript') {
+    patterns.push(
+      // export function foo() / export async function foo()
+      { re: /^\s*export\s+(?:async\s+)?function\s+(\w+)/, group: 1, prefix: 'fn' },
+      // export class Foo / export abstract class Foo
+      { re: /^\s*export\s+(?:abstract\s+)?class\s+(\w+)/, group: 1, prefix: 'class' },
+      // export interface IFoo
+      { re: /^\s*export\s+interface\s+(\w+)/, group: 1, prefix: 'interface' },
+      // export type Foo =
+      { re: /^\s*export\s+type\s+(\w+)\s*[=<]/, group: 1, prefix: 'type' },
+      // export enum Foo
+      { re: /^\s*export\s+enum\s+(\w+)/, group: 1, prefix: 'enum' },
+      // class method: public/private/protected async foo(
+      { re: /^\s+(?:public|private|protected|static|async|override|readonly)(?:\s+(?:public|private|protected|static|async|override|readonly))*\s+(\w+)\s*\(/, group: 1, prefix: 'method' },
+      // export const foo = ... (only arrow functions / values)
+      { re: /^\s*export\s+const\s+(\w+)\s*(?:=|:)/, group: 1, prefix: 'const' },
+    );
+  } else if (language === 'python') {
+    patterns.push(
+      { re: /^def\s+(\w+)\s*\(/, group: 1, prefix: 'fn' },
+      { re: /^class\s+(\w+)/, group: 1, prefix: 'class' },
+      { re: /^async\s+def\s+(\w+)\s*\(/, group: 1, prefix: 'fn' },
+    );
+  } else if (language === 'java') {
+    patterns.push(
+      { re: /^\s*(?:public|private|protected|static|final|abstract(?:\s+class)?).*?(?:class|interface|enum)\s+(\w+)/, group: 1, prefix: 'class' },
+      { re: /^\s*(?:public|private|protected|static)[^(]*\s+(\w+)\s*\(/, group: 1, prefix: 'method' },
+    );
+  } else if (language === 'go') {
+    patterns.push(
+      { re: /^func\s+(?:\([^)]*\)\s+)?(\w+)\s*\(/, group: 1, prefix: 'fn' },
+      { re: /^type\s+(\w+)\s+(?:struct|interface)/, group: 1, prefix: 'type' },
+    );
+  } else if (language === 'rust') {
+    patterns.push(
+      { re: /^(?:pub\s+)?fn\s+(\w+)/, group: 1, prefix: 'fn' },
+      { re: /^(?:pub\s+)?struct\s+(\w+)/, group: 1, prefix: 'struct' },
+      { re: /^(?:pub\s+)?trait\s+(\w+)/, group: 1, prefix: 'trait' },
+      { re: /^(?:pub\s+)?enum\s+(\w+)/, group: 1, prefix: 'enum' },
+    );
+  }
+
+  const seen = new Set<string>();
+
+  for (const line of lines) {
+    for (const { re, group, prefix } of patterns) {
+      const m = re.exec(line);
+      if (m && m[group]) {
+        const name = m[group];
+        // Skip trivial names: constructor, index, render (too common/noisy)
+        if (['constructor', 'render', 'index', 'default', 'toString', 'valueOf'].includes(name)) continue;
+        const label = prefix ? `${prefix}:${name}` : name;
+        if (!seen.has(label)) {
+          seen.add(label);
+          symbols.push(name + (prefix === 'fn' || prefix === 'method' ? '()' : prefix === 'class' ? ' {class}' : prefix === 'interface' ? ' {interface}' : prefix === 'type' ? ' {type}' : prefix === 'enum' ? ' {enum}' : ''));
+        }
+        break; // only one pattern match per line
+      }
+    }
+  }
+
+  return symbols.slice(0, 20); // cap at 20 symbols per file to keep map lean
+}
+
+/**
+ * Build the full repo map string for all indexed files.
+ * Format (one line per file):
+ *   src/auth/user.service.ts → getUserById(), class UserService, ...
+ */
+export function buildSymbolsMap(chunks: CodeChunk[]): string {
+  // Group chunks by file
+  const fileContentMap = new Map<string, { content: string; language: string }>();
+  for (const chunk of chunks) {
+    if (!fileContentMap.has(chunk.relativePath)) {
+      fileContentMap.set(chunk.relativePath, { content: chunk.content, language: chunk.language });
+    } else {
+      // Concatenate chunks to reconstruct file content for symbol extraction
+      const existing = fileContentMap.get(chunk.relativePath)!;
+      existing.content += '\n' + chunk.content;
+    }
+  }
+
+  const lines: string[] = [];
+  for (const [relPath, { content, language }] of fileContentMap) {
+    const symbols = extractSymbols(content, language);
+    if (symbols.length > 0) {
+      lines.push(`${relPath} → ${symbols.join(', ')}`);
+    }
+  }
+
+  // Sort by path for stable output
+  lines.sort();
+  return lines.join('\n');
+}
 
 /**
  * Tokenize text into normalized terms.
@@ -334,11 +447,13 @@ export async function indexProject(rootPath: string): Promise<IndexedProject> {
   }
 
   const fileTree = await buildFileTreeString(rootPath, rootPath);
+  const symbolsMap = buildSymbolsMap(allChunks);
 
   currentIndex = {
     rootPath,
     chunks: allChunks,
     fileTree,
+    symbolsMap,
     totalFiles,
     totalChunks: allChunks.length,
     indexedAt: new Date(),
