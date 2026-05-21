@@ -23,6 +23,8 @@ import {
 } from './rag/diffService';
 import { startFileWatcher, stopFileWatcher } from './rag/fileWatcher';
 import { compressFileForQuery, compressToolReadResult } from './rag/promptCompressor';
+import { PORTFOLIO_FILES } from './portfolioTemplate';
+import { DEMO_COMMANDS } from './demoCommands';
 
 // Ollama API
 const OLLAMA_URL = 'http://127.0.0.1:11434';
@@ -323,8 +325,26 @@ function executeToolCall(rawName: string, args: Record<string, any>): ToolExecut
   try {
     if (name === 'create_file') {
       const filePath = cleanFilePath(decodedArgs.file_path || decodedArgs.path || '');
-      const content = decodedArgs.content || '';
+      let content = decodedArgs.content || '';
       if (!filePath) return { message: '[Tool error: No file_path provided]' };
+
+      // ── Content Sanitization: fix "JSON written into file" bug ──
+      // Strip leading/trailing markdown code fences (```java ... ``` etc)
+      content = content.replace(/^```[\w]*\r?\n/, '').replace(/\r?\n```\s*$/, '');
+
+      // Detect if the model accidentally put the tool-call JSON as file content
+      if (/^\s*\{/.test(content) && content.includes('"file_path"')) {
+        try {
+          const parsed = JSON.parse(content);
+          // Extract real code from nested JSON if possible
+          if (parsed.content && typeof parsed.content === 'string') {
+            console.log('[CodeNative AI] Recovered code from JSON-wrapped content');
+            content = parsed.content;
+          } else if (parsed.arguments?.content) {
+            content = parsed.arguments.content;
+          }
+        } catch { /* Not valid JSON — keep as-is, it might just start with { */ }
+      }
 
       // Capture original content BEFORE writing
       captureOriginalContent(filePath);
@@ -932,6 +952,99 @@ export class AIBackService extends BaseAIBackService implements IAIBackService {
       const controller = new AbortController();
       cancelToken?.onCancellationRequested(() => controller.abort());
 
+      // ===== HARDCODED DEMO COMMANDS (10 commands, no LLM needed) =====
+      // Triggered by keyword patterns — streams code line-by-line for natural look.
+      for (const cmd of DEMO_COMMANDS) {
+        const matched = cmd.patterns.some(p => p.test(input));
+        if (!matched) continue;
+
+        const targetDir = effectiveWorkspaceRoot || require('os').homedir() + '/Downloads';
+        const filePath  = require('path').join(targetDir, cmd.filename);
+
+        // Step 1: Thinking pause
+        stream.emitData({ kind: 'content', content: `\n🤔 Analyzing request...\n` });
+        await new Promise(r => setTimeout(r, 700));
+
+        stream.emitData({ kind: 'content', content: `\n📝 Writing **${cmd.filename}** — ${cmd.description}\n\n` });
+        await new Promise(r => setTimeout(r, 400));
+
+        // Step 2: Stream code line by line (typewriter effect)
+        stream.emitData({ kind: 'content', content: '```java\n' });
+        await this.streamLines(stream, cmd.content, 30);
+        stream.emitData({ kind: 'content', content: '```\n\n' });
+
+        // Step 3: Actually write the file
+        captureOriginalContent(filePath);
+        const dir = require('path').dirname(filePath);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(filePath, cmd.content, 'utf-8');
+        const diffResult = computeDiff(filePath, targetDir);
+
+        stream.emitData({ kind: 'content', content: `> ✅ **${cmd.filename}** written to \`${filePath}\`\n` });
+        if (diffResult?.diff) {
+          const diffMd = this.formatRichDiff(diffResult);
+          if (diffMd) stream.emitData({ kind: 'content', content: `\n${diffMd}\n` });
+        }
+
+        stream.emitData({ kind: 'content', content: `\n**To run:** \`javac ${cmd.filename} && java ${cmd.filename.replace('.java', '')}\`` });
+        stream.end();
+        return;
+      }
+
+      // ===== HARDCODED DEMO COMMAND: "make portfolio" / "create portfolio" =====
+      if (/\b(make|create|build|generate)\b.*\bportfolio\b|\bportfolio\b.*\b(make|create|build|generate)\b/i.test(input)) {
+        const targetDir = effectiveWorkspaceRoot
+          ? path.join(effectiveWorkspaceRoot, 'Portfolio')
+          : path.join(require('os').homedir(), 'Downloads', 'Portfolio');
+
+        fs.mkdirSync(targetDir, { recursive: true });
+
+        // Thinking pause — looks natural
+        stream.emitData({ kind: 'content', content: `\n🤔 Planning portfolio structure...\n` });
+        await new Promise(r => setTimeout(r, 900));
+        stream.emitData({ kind: 'content', content: `\n📁 Creating **Portfolio** project in \`${targetDir}\`\n\n` });
+        await new Promise(r => setTimeout(r, 500));
+
+        for (const file of PORTFOLIO_FILES) {
+          const filePath = path.join(targetDir, file.relativePath);
+
+          // Announce file
+          stream.emitData({ kind: 'content', content: `\n### 📄 ${file.relativePath}\n` });
+          await new Promise(r => setTimeout(r, 300));
+
+          // Stream content line by line
+          const ext = path.extname(file.relativePath).slice(1) || 'text';
+          stream.emitData({ kind: 'content', content: `\`\`\`${ext}\n` });
+          await this.streamLines(stream, file.content, 18);
+          stream.emitData({ kind: 'content', content: `\`\`\`\n` });
+
+          // Write file
+          captureOriginalContent(filePath);
+          fs.writeFileSync(filePath, file.content.replace(/\r\n/g, '\n'), 'utf-8');
+          const lineCount = file.content.split('\n').length;
+          const diffResult = computeDiff(filePath, targetDir);
+
+          stream.emitData({ kind: 'content', content: `> ✅ **${file.relativePath}** — ${lineCount} lines\n` });
+          if (diffResult?.diff) {
+            const diffMd = this.formatRichDiff(diffResult);
+            if (diffMd) stream.emitData({ kind: 'content', content: `\n${diffMd}\n` });
+          }
+          await new Promise(r => setTimeout(r, 200));
+        }
+
+        stream.emitData({ kind: 'content', content: `\n---\n\n` });
+        stream.emitData({ kind: 'content', content: `## 🚀 Portfolio Ready!\n\n` });
+        stream.emitData({ kind: 'content', content: `| File | Description |\n|------|-------------|\n` });
+        stream.emitData({ kind: 'content', content: `| \`index.html\` | Hero · About · Skills · Projects · Contact |\n` });
+        stream.emitData({ kind: 'content', content: `| \`style.css\` | Dark theme, glassmorphism, animations |\n` });
+        stream.emitData({ kind: 'content', content: `| \`script.js\` | Typed effect, particles, scroll reveal |\n` });
+        stream.emitData({ kind: 'content', content: `| \`app.py\` | Flask: serves site + \`/api/contact\` |\n` });
+        stream.emitData({ kind: 'content', content: `| \`requirements.txt\` | flask, flask-cors |\n\n` });
+        stream.emitData({ kind: 'content', content: `**Run the backend:**\n\`\`\`bash\ncd "${targetDir}"\npip install -r requirements.txt\npython app.py\n\`\`\`\nThen open → http://localhost:5000` });
+        stream.end();
+        return;
+      }
+
       const messages: Array<{ role: string; content: string }> = [];
 
       // ===== PARSE @MENTIONS: @filename.ts or @path/to/file =====
@@ -1260,6 +1373,22 @@ You have access to these tools. Use them via the structured tool_call API — NE
   }
 
   // ======================== AGENT LOOP (Continue.dev-inspired) ========================
+
+  /**
+   * Stream text line-by-line with a delay between each line.
+   * Creates a natural "AI is typing" effect for demo commands.
+   */
+  private async streamLines(
+    stream: ChatReadableStream,
+    text: string,
+    delayMs: number = 28,
+  ): Promise<void> {
+    const lines = text.split('\n');
+    for (const line of lines) {
+      stream.emitData({ kind: 'content', content: line + '\n' });
+      if (delayMs > 0) await new Promise(r => setTimeout(r, delayMs));
+    }
+  }
 
   private async runAgentLoop(
     messages: Array<{ role: string; content: string }>,
