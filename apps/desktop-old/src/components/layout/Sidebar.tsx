@@ -13,24 +13,44 @@ interface SectionProps {
 
 const Section: React.FC<SectionProps> = ({ title, children, defaultExpanded = true }) => {
     const [isExpanded, setIsExpanded] = useState(defaultExpanded);
+    const sectionId = `section-${title.replace(/\s+/g, '-').toLowerCase()}`;
+    const headerId = `${sectionId}-header`;
+
+    const handleKeyDown = (e: React.KeyboardEvent) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setIsExpanded(!isExpanded);
+        }
+    };
 
     return (
         <div className="flex flex-col">
-            <div
-                className="sidebar-section-header"
-                onClick={() => setIsExpanded(!isExpanded)}
-            >
-                <span
-                    className="sidebar-section-icon"
-                    style={{
-                        transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',
-                    }}
+            <h3 style={{ margin: 0, padding: 0, fontSize: 'inherit', fontWeight: 'inherit' }}>
+                <div
+                    id={headerId}
+                    role="button"
+                    aria-expanded={isExpanded}
+                    aria-controls={sectionId}
+                    tabIndex={0}
+                    className="sidebar-section-header"
+                    onClick={() => setIsExpanded(!isExpanded)}
+                    onKeyDown={handleKeyDown}
                 >
-                    <ChevronDown size={14} strokeWidth={2} />
-                </span>
-                <span className="truncate">{title}</span>
-            </div>
+                    <span
+                        className="sidebar-section-icon"
+                        style={{
+                            transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',
+                        }}
+                    >
+                        <ChevronDown size={14} strokeWidth={2} />
+                    </span>
+                    <span className="truncate">{title}</span>
+                </div>
+            </h3>
             <div
+                id={sectionId}
+                role="region"
+                aria-labelledby={headerId}
                 style={{
                     overflow: 'hidden',
                     maxHeight: isExpanded ? '2000px' : '0',
@@ -61,6 +81,7 @@ const SidebarAction: React.FC<{
 }> = ({ icon, title, onClick }) => (
     <button
         onClick={onClick}
+        aria-label={title}
         className="p-1.5 rounded transition-all cursor-pointer border-none bg-transparent"
         style={{ color: '#565f89' }}
         onMouseEnter={(e) => {
@@ -160,6 +181,7 @@ const SearchPanel: React.FC = () => {
                 <input
                     type="text"
                     placeholder="Search"
+                    aria-label="Search files"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className="w-full pl-8 pr-2 py-2 outline-none rounded text-[13px]"
@@ -178,6 +200,7 @@ const SearchPanel: React.FC = () => {
                 <input
                     type="text"
                     placeholder="Replace"
+                    aria-label="Replace text"
                     className="w-full px-2 py-2 outline-none rounded text-[13px]"
                     style={{
                         backgroundColor: '#1a1b26',

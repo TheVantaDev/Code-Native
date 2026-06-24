@@ -41,6 +41,7 @@ export const EditorTab: React.FC<EditorTabProps> = ({
         <div
             role="tab"
             aria-selected={isActive}
+            tabIndex={isActive ? 0 : -1}
             onClick={() => setActiveFile(fileId)}
             onMouseDown={(e) => e.button === 1 && closeFile(fileId)}
             className={`tab ${isActive ? 'active' : ''}`}
@@ -74,6 +75,7 @@ export const EditorTab: React.FC<EditorTabProps> = ({
                             e.stopPropagation();
                             closeFile(fileId);
                         }}
+                        aria-label={`Close ${fileName}`}
                         className="tab-close"
                     >
                         <X size={14} />

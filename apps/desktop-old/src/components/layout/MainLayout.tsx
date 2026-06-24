@@ -29,32 +29,42 @@ export const MainLayout: React.FC = () => {
             style={{ backgroundColor: 'var(--vscode-editor-background)' }}
         >
             {/* Title Bar - Top */}
-            <TitleBar />
+            <header>
+                <TitleBar />
+            </header>
 
             {/* Main Content Area */}
             <div className="flex flex-1 min-h-0">
                 {/* Activity Bar - Far Left */}
-                <ActivityBar />
+                <nav aria-label="Activity Bar">
+                    <ActivityBar />
+                </nav>
 
                 {/* Sidebar - Left */}
-                <Sidebar />
+                <aside aria-label="Sidebar">
+                    <Sidebar />
+                </aside>
 
                 {/* Editor + Terminal Area - Center */}
-                <div className="flex-1 flex flex-col min-w-0">
+                <main className="flex-1 flex flex-col min-w-0">
                     <div className="flex-1 min-h-0">
                         <EditorArea />
                     </div>
                     {isTerminalOpen && (
                         <TerminalPanel onClose={toggleTerminal} />
                     )}
-                </div>
+                </main>
 
                 {/* AI Panel - Right */}
-                <AIPanel />
+                <aside aria-label="AI Assistant">
+                    <AIPanel />
+                </aside>
             </div>
 
             {/* Status Bar - Bottom */}
-            <StatusBar />
+            <footer>
+                <StatusBar />
+            </footer>
         </div>
     );
 };
